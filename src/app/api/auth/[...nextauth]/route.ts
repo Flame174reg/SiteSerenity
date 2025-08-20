@@ -1,7 +1,8 @@
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 
-const handler = NextAuth({
+export const { handlers: { GET, POST } } = NextAuth({
+  secret: process.env.AUTH_SECRET,
   providers: [
     Discord({
       clientId: process.env.DISCORD_CLIENT_ID!,
@@ -9,7 +10,4 @@ const handler = NextAuth({
       authorization: { params: { scope: "identify guilds email" } },
     }),
   ],
-  secret: process.env.AUTH_SECRET,
 });
-
-export { handler as GET, handler as POST };
