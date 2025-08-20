@@ -5,8 +5,6 @@ declare module "next-auth" {
     accessToken?: string;
     discordId?: string;
   }
-
-  // добавим поле, которое реально приходит от Discord
   interface Account {
     access_token?: string;
   }
