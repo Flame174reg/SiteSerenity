@@ -1,12 +1,10 @@
+// src/auth.ts
 import NextAuth from "next-auth";
 import Discord, { type DiscordProfile } from "next-auth/providers/discord";
 import type { JWT } from "next-auth/jwt";
 import type { Account, Session } from "next-auth";
 
-export const {
-  handlers: { GET, POST },
-  auth,
-} = NextAuth({
+export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
   providers: [
     Discord({
