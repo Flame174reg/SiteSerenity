@@ -1,26 +1,19 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/app/api/auth/[...nextauth]/route"; // серверный гард
-import SignOutButton from "./signout-button";
+"use client";
+import { useSession } from "next-auth/react";
 
-export default async function Dashboard() {
-  const session = await auth();     // проверяем сессию на сервере
-  if (!session) redirect("/");      // гость -> на главную
+export default function Dashboard() {
+  const { data: session } = useSession();
 
   return (
     <main className="p-6">
       <h1 className="text-3xl font-bold">Добро пожаловать в Dashboard 🚀</h1>
-      <p className="text-gray-600 mt-2">Это защищённая страница. Вы вошли как:</p>
+      <p className="text-gray-600 mt-2">
+        Это ваша первая отдельная страница на сайте.
+      </p>
 
-      <div className="mt-4 space-y-1">
-        <div><b>Имя:</b> {session.user?.name}</div>
-        <div><b>Email:</b> {session.user?.email ?? "—"}</div>
-        {/* @ts-ignore */}
-        <div><b>Discord ID:</b> {session.discordId ?? "—"}</div>
-      </div>
-
-      <div className="mt-6">
-        <SignOutButton />
-      </div>
+      {session?.user?.name && (
+        <p className="mt-4 opacity-70">Вы вошли как {session.user.name}</p>
+      )}
     </main>
   );
 }
