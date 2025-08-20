@@ -89,6 +89,7 @@ export default function Sidebar() {
             Документы
           </div>
           <Item href="/contracts">Контракты</Item>
+          <Item href="/weekly">Недельный актив</Item>
         </nav>
       </aside>
     </>
