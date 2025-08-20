@@ -14,7 +14,7 @@ export default function Home() {
         <Link href="/" className="text-xl font-bold">Site Serenity</Link>
 
         <div className="flex items-center gap-3">
-          <Link className="underline" href="/dashboard">Dashboard</Link>
+          <Link className="underline" href="/rules">Правила семьи</Link>
 
           {status === "authenticated" ? (
             <>
