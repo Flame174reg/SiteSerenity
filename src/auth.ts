@@ -1,8 +1,8 @@
 // src/auth.ts
 import NextAuth from "next-auth";
 import Discord, { type DiscordProfile } from "next-auth/providers/discord";
-import type { Account, Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
+import type { Account, Session } from "next-auth";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
@@ -18,11 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       token,
       account,
       profile,
-    }: {
-      token: JWT;
-      account?: Account | null;
-      profile?: DiscordProfile | null;
-    }) {
+    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
       if (account?.access_token) token.accessToken = account.access_token;
       if (profile?.id) token.discordId = profile.id;
       return token;
