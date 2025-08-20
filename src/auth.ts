@@ -1,8 +1,6 @@
 // src/auth.ts
 import NextAuth from "next-auth";
-import Discord, { type DiscordProfile } from "next-auth/providers/discord";
-import type { JWT } from "next-auth/jwt";
-import type { Account, Session } from "next-auth";
+import Discord from "next-auth/providers/discord";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
@@ -14,18 +12,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({
-      token,
-      account,
-      profile,
-    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
-      if (account?.access_token) token.accessToken = account.access_token;
-      if (profile?.id) token.discordId = profile.id;
+    async jwt({ token, account }) {
+      // токен доступа от Discord
+      if (account && "access_token" in account && typeof account.access_token === "string") {
+        // поле расширено в src/types/next-auth.d.ts
+        token.accessToken = account.access_token;
+      }
+      // возьмём Discord ID из providerAccountId (надёжнее, чем profile.id)
+      if (account?.providerAccountId) {
+        token.discordId = account.providerAccountId;
+      }
       return token;
     },
-    async session({ session, token }: { session: Session; token: JWT }) {
-      session.accessToken = token.accessToken;
-      session.discordId = token.discordId;
+
+    async session({ session, token }) {
+      session.accessToken = token.accessToken as string | undefined;
+      session.discordId = token.discordId as string | undefined;
       return session;
     },
   },
