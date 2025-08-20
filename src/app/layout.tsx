@@ -1,11 +1,11 @@
-// src/app/layout.tsx
-import "./globals.css";
-import type { Metadata } from "next";
-import Link from "next/link";
+import './globals.css';
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import SessionProviderWrapper from '../components/SessionProvider';
 
 export const metadata: Metadata = {
-  title: "Site Serenity",
-  description: "Family portal",
+  title: 'Site Serenity',
+  description: 'Family portal',
 };
 
 export default function RootLayout({
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className="min-h-screen">
-        {/* Глобальный хедер — виден на всех страницах */}
+        {/* Глобальный хедер — показывается на всех страницах */}
         <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur">
           <div className="mx-auto max-w-5xl h-14 px-6 flex items-center justify-between">
             {/* Кнопка на главную */}
@@ -27,18 +27,17 @@ export default function RootLayout({
               ← На главную
             </Link>
 
-            {/* Навигация (можно добавлять ссылки по мере появления страниц) */}
+            {/* Навигация (добавляй пункты по мере появления страниц) */}
             <nav className="flex items-center gap-4 text-sm">
               <Link href="/rules" className="hover:underline">
                 Правила
               </Link>
-              {/* <Link href="/about" className="hover:underline">О нас</Link> */}
             </nav>
           </div>
         </header>
 
-        {/* Контент страницы */}
-        {children}
+        {/* ВАЖНО: оборачиваем всё приложение в провайдер сессии */}
+        <SessionProviderWrapper>{children}</SessionProviderWrapper>
       </body>
     </html>
   );
