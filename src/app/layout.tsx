@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import SessionProviderWrapper from '../components/SessionProvider';
+import ThemeBackground from '../components/ThemeBackground'; // ⬅️ добавили
 
 export const metadata: Metadata = {
   title: 'Site Serenity',
@@ -15,7 +16,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ru">
-      <body className="min-h-screen">
+      <body className="min-h-screen text-white antialiased">
+        {/* Глобальный фон для всех страниц */}
+        <ThemeBackground />
+
         {/* Глобальный хедер — показывается на всех страницах */}
         <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur">
           <div className="mx-auto max-w-5xl h-14 px-6 flex items-center justify-between">
