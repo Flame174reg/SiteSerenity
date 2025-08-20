@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities */
 export const metadata = {
   title: "Правила семьи",
   description: "Внутренние правила и политика сообщества",
