@@ -1,12 +1,14 @@
-import { DefaultSession } from "next-auth";
+import type { DefaultSession } from "next-auth";
 
 declare module "next-auth" {
-  interface Session {
+  interface Session extends DefaultSession {
     accessToken?: string;
     discordId?: string;
-    user?: DefaultSession["user"] & {
-      id?: string | null;
-    };
+  }
+
+  // добавим поле, которое реально приходит от Discord
+  interface Account {
+    access_token?: string;
   }
 }
 
