@@ -82,7 +82,7 @@ export default function Sidebar() {
             {/* Когда появится отдельная страница гос.памяток — поменяй href */}
             {/* <Item href="/memos/gov">Памятки госника</Item> */}
             <Item href="/memos/interrogations">Памятка по допросам</Item>
-            {/* <Item href="/memos/anti">Памятка против душки</Item> */}
+            <Item href="/memos/anti">Памятка против душки</Item>
           </div>
 
           <div className="px-3 pt-3 pb-1 text-xs uppercase opacity-60">
