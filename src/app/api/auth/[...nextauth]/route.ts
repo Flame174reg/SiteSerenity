@@ -1,7 +1,12 @@
 import NextAuth from "next-auth";
-import Discord from "next-auth/providers/discord";
+import Discord, { type DiscordProfile } from "next-auth/providers/discord";
+import type { JWT } from "next-auth/jwt";
+import type { Account, Session } from "next-auth";
 
-const { handlers, auth } = NextAuth({
+export const {
+  handlers: { GET, POST },
+  auth,
+} = NextAuth({
   secret: process.env.AUTH_SECRET,
   providers: [
     Discord({
@@ -11,25 +16,24 @@ const { handlers, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
-      // account.access_token присутствует в типах Account (опционально)
+    async jwt({
+      token,
+      account,
+      profile,
+    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
       if (account?.access_token) {
         token.accessToken = account.access_token;
       }
-      // В OAuth-профиле id может быть без жёсткого типа — проверяем и пишем в JWT
-      const pid = (profile as any)?.id;
-      if (typeof pid === "string") token.discordId = pid;
-
+      if (profile?.id) {
+        token.discordId = profile.id;
+      }
       return token;
     },
-    async session({ session, token }) {
-      session.accessToken = token.accessToken as string | undefined;
-      session.discordId = token.discordId as string | undefined;
+
+    async session({ session, token }: { session: Session; token: JWT }) {
+      session.accessToken = token.accessToken;
+      session.discordId = token.discordId;
       return session;
     },
   },
 });
-
-// Важно: именно так экспортируем GET/POST, иначе роут не поднимется
-export const { GET, POST } = handlers;
-export { auth };
