@@ -89,6 +89,7 @@ export default function Sidebar() {
             Документы
           </div>
           <Item href="/contracts">Контракты</Item>
+          <Item href="/tools/trucker">Калькулятор дальнобойщика</Item>
         </nav>
       </aside>
     </>
