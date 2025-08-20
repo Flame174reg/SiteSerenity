@@ -1,5 +1,3 @@
-import Toc from "./toc";
-
 const Tag = ({ children }: { children: React.ReactNode }) => (
   <span className="inline-block px-2 py-0.5 rounded bg-white/10 text-xs align-middle ml-1">
     {children}
@@ -22,9 +20,18 @@ export default function RulesPage() {
   return (
     <main id="top" className="px-6 py-10">
       <div className="mx-auto max-w-5xl grid gap-8 lg:grid-cols-[240px_1fr]">
-        {/* Сайдбар со содержанием (scrollspy) */}
-        <aside>
-          <Toc />
+        {/* Сайдбар со статическим содержанием */}
+        <aside
+          className="rounded-xl border border-white/10 bg-white/5 p-4 lg:sticky lg:top-6 h-max"
+          role="navigation"
+          aria-label="Содержание правил"
+        >
+          <p className="font-semibold mb-2">Содержание</p>
+          <ul className="grid gap-1 text-sm">
+            <li><a className="hover:underline" href="#p1">1. Общие положения</a></li>
+            <li><a className="hover:underline" href="#p2">2. Dress-Code и транспорт</a></li>
+            <li><a className="hover:underline" href="#p3">3. Общие запреты</a></li>
+          </ul>
         </aside>
 
         {/* Контент */}
@@ -67,15 +74,10 @@ export default function RulesPage() {
           <section id="p2" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">2. Dress-Code и транспорт семьи</h2>
             <ol className="list-decimal pl-6 space-y-2 leading-relaxed marker:text-gray-500">
-              <li>
-                На мероприятиях каждый участник обязан носить полностью чёрную одежду (верх и низ) на активностях airdrop/тайники. Аксессуары — любого цвета.
-              </li>
+              <li>На мероприятиях каждый участник обязан носить полностью чёрную одежду (верх и низ) на активностях airdrop/тайники. Аксессуары — любого цвета.</li>
               <li>Личный транспорт на мероприятиях должен быть чёрного цвета.</li>
               <li>При передаче личного транспорта в распоряжение семьи — предварительно перекрасить в чёрный.</li>
-              <li>
-                Нарушение Dress-Code/требований к транспорту расценивается как проявление неуважения к семье.
-                <Tag>WARN</Tag>
-              </li>
+              <li>Нарушение Dress-Code/требований к транспорту расценивается как проявление неуважения к семье. <Tag>WARN</Tag></li>
             </ol>
           </section>
 
@@ -85,18 +87,9 @@ export default function RulesPage() {
           <section id="p3" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">3. Общие запреты</h2>
             <ol className="list-decimal pl-6 space-y-2 leading-relaxed marker:text-gray-500">
-              <li>
-                Разглашение информации — запрещено передавать третьим лицам любые сведения о семье.
-                <Tag>TIMEOUT ≥1 день</Tag><Tag>WARN</Tag>
-              </li>
-              <li>
-                Оскорбления — запрещены любые формы унижения членов семьи…
-                <Tag>TIMEOUT ≥1 час</Tag><Tag>WARN</Tag>
-              </li>
-              <li>
-                Аморальные поступки и неадекватное поведение — запрещены действия, дискредитирующие семью.
-                <Tag>TIMEOUT ≥1 день</Tag><Tag>WARN</Tag><Tag>KICK</Tag>
-              </li>
+              <li>Разглашение информации — запрещено передавать третьим лицам любые сведения о семье. <Tag>TIMEOUT ≥1 день</Tag><Tag>WARN</Tag></li>
+              <li>Оскорбления — запрещены любые формы унижения членов семьи… <Tag>TIMEOUT ≥1 час</Tag><Tag>WARN</Tag></li>
+              <li>Аморальные поступки и неадекватное поведение — запрещены действия, дискредитирующие семью. <Tag>TIMEOUT ≥1 день</Tag><Tag>WARN</Tag><Tag>KICK</Tag></li>
               <li>Запрещено распространять ложную информацию… <Tag>WARN</Tag><Tag>KICK</Tag></li>
               <li>Разжигание конфликтов… <Tag>WARN</Tag><Tag>KICK</Tag></li>
               <li>Флуд и спам… <Tag>WARN</Tag></li>
