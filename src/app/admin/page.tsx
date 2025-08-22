@@ -4,7 +4,7 @@ import AdminClient from "./ui/AdminClient";
 
 export default async function AdminPage() {
   const session = await auth();
-  const me = session?.discordId; // без any
+  const me = session?.user?.id;
   const OWNER_ID = "1195944713639960601";
 
   if (!me) {
