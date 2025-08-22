@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const session = await auth();
-  const me = (session as any)?.discordId as string | undefined;
+  const me = session?.discordId; // без any
   if (!me) return NextResponse.json({ ok: false }, { status: 401 });
 
   const OWNER_ID = "1195944713639960601";
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false }, { status: 403 });
   }
 
-  const body = await req.json().catch(() => null) as { id?: string; admin?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { id?: string; admin?: boolean } | null;
   if (!body?.id || typeof body.admin !== "boolean") {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
