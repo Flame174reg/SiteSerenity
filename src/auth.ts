@@ -3,7 +3,6 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { sql } from "@vercel/postgres";
 
-/** Узкий тайпгард для безопасного доступа к строковым полям */
 function getString(obj: unknown, key: string): string | undefined {
   if (obj && typeof obj === "object" && key in obj) {
     const v = (obj as Record<string, unknown>)[key];
@@ -22,16 +21,13 @@ async function tableExists(table: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function columnExists(table: string, column: string): Promise<boolean> {
+async function getExistingColumns(table: string): Promise<Set<string>> {
   const { rows } = await sql/*sql*/`
-    SELECT 1
+    SELECT column_name
     FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = ${table}
-      AND column_name = ${column}
-    LIMIT 1;
+    WHERE table_schema = 'public' AND table_name = ${table};
   `;
-  return rows.length > 0;
+  return new Set(rows.map((r) => String(r.column_name)));
 }
 
 const authConfig = {
@@ -70,7 +66,7 @@ const authConfig = {
 
   events: {
     async signIn({ profile, account }) {
-      // Подготавливаем данные
+      // 1) ID и данные из профиля
       const pid =
         getString(profile as unknown, "id") ??
         getString(account as unknown, "providerAccountId");
@@ -87,41 +83,51 @@ const authConfig = {
         ? `https://cdn.discordapp.com/avatars/${pid}/${avatarHash}.png`
         : null;
 
-      // Если таблицы нет — создадим минимальную (без avatar_url, чтобы не требовать DDL на плате)
+      // 2) Минимальная таблица если нет
       if (!(await tableExists("users"))) {
         await sql/*sql*/`
           CREATE TABLE IF NOT EXISTS users (
             discord_id TEXT PRIMARY KEY,
             name TEXT,
-            email TEXT,
             last_login_at TIMESTAMPTZ
           );
         `;
       }
 
-      // Узнаем, есть ли колонка avatar_url; вставляем с нужным набором полей
-      const hasAvatar = await columnExists("users", "avatar_url");
+      // 3) Динамический UPSERT по существующим колонкам
+      const cols = await getExistingColumns("users");
+      const fields: string[] = ["discord_id"];
+      const values: string[] = [`'${pid.replace(/'/g, "''")}'`];
 
-      if (hasAvatar) {
-        await sql/*sql*/`
-          INSERT INTO users (discord_id, name, email, avatar_url, last_login_at)
-          VALUES (${pid}, ${name}, ${email}, ${avatar}, NOW())
-          ON CONFLICT (discord_id) DO UPDATE
-          SET name = EXCLUDED.name,
-              email = EXCLUDED.email,
-              avatar_url = EXCLUDED.avatar_url,
-              last_login_at = NOW();
-        `;
-      } else {
-        await sql/*sql*/`
-          INSERT INTO users (discord_id, name, email, last_login_at)
-          VALUES (${pid}, ${name}, ${email}, NOW())
-          ON CONFLICT (discord_id) DO UPDATE
-          SET name = EXCLUDED.name,
-              email = EXCLUDED.email,
-              last_login_at = NOW();
-        `;
+      if (cols.has("name")) {
+        fields.push("name");
+        values.push(name === null ? "NULL" : `'${name.replace(/'/g, "''")}'`);
       }
+      if (cols.has("email")) {
+        fields.push("email");
+        values.push(email === null ? "NULL" : `'${email.replace(/'/g, "''")}'`);
+      }
+      if (cols.has("avatar_url")) {
+        fields.push("avatar_url");
+        values.push(avatar === null ? "NULL" : `'${avatar.replace(/'/g, "''")}'`);
+      }
+      if (cols.has("last_login_at")) {
+        fields.push("last_login_at");
+        values.push("NOW()");
+      }
+
+      const setUpdates = fields
+        .filter((f) => f !== "discord_id")
+        .map((f) => `${f} = EXCLUDED.${f}`)
+        .join(", ");
+
+      const query = `
+        INSERT INTO users (${fields.join(", ")})
+        VALUES (${values.join(", ")})
+        ON CONFLICT (discord_id) DO UPDATE SET ${setUpdates};
+      `;
+
+      await sql.unsafe(query);
     },
   },
 } satisfies NextAuthConfig;
