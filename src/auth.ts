@@ -1,18 +1,19 @@
 // src/auth.ts
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord, { type DiscordProfile } from "next-auth/providers/discord";
 import type { JWT } from "next-auth/jwt";
-import type { Account, Session, Profile } from "next-auth";
+import type { Account, Session } from "next-auth";
 import { sql } from "@vercel/postgres";
 import { ensureTables } from "@/lib/db";
 
-const authConfig = {
+// ВАЖНО: никакого `as const` здесь не используем
+const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,
   providers: [
     Discord({
       clientId: process.env.DISCORD_CLIENT_ID!,
       clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-      authorization: { params: { scope: "identify guilds email" } },
+      authorization: { params: { scope: "identify email guilds" } },
     }),
   ],
   callbacks: {
@@ -20,88 +21,52 @@ const authConfig = {
       token,
       account,
       profile,
-    }: {
-      token: JWT;
-      account?: Account | null;
-      profile?: Profile | null;
-    }) {
-      // access_token от Discord (если есть)
+    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
       if (account?.access_token) {
-        token.accessToken = account.access_token;
+        (token as JWT & { accessToken?: string }).accessToken = account.access_token;
       }
-
-      // Discord id из профиля (без any — через безопасное сужение типа)
-      if (profile && "id" in profile && typeof (profile as { id?: unknown }).id === "string") {
-        token.discordId = (profile as { id: string }).id;
+      if (profile?.id) {
+        (token as JWT & { discordId?: string }).discordId = profile.id;
       }
-
       return token;
     },
-
     async session({ session, token }: { session: Session; token: JWT }) {
-      session.accessToken = token.accessToken;
-      session.discordId = token.discordId;
-      return session;
+      const s = session as Session & { accessToken?: string; discordId?: string };
+      const t = token as JWT & { accessToken?: string; discordId?: string };
+      s.accessToken = t.accessToken;
+      s.discordId = t.discordId;
+      return s;
     },
   },
-
   events: {
-    // Сохраняем/обновляем пользователя при авторизации
-    async signIn({
-      account,
-      profile,
-    }: {
-      account?: Account | null;
-      profile?: Profile | null;
-    }) {
-      const discordId: string | null =
-        (profile && "id" in profile && typeof (profile as { id?: unknown }).id === "string"
-          ? (profile as { id: string }).id
-          : account?.providerAccountId) ?? null;
-
+    // сохраняем/обновляем пользователя в БД при логине
+    async signIn({ account, profile }) {
+      const p = profile as DiscordProfile | null | undefined;
+      const discordId = p?.id ?? account?.providerAccountId ?? null;
       if (!discordId) return;
 
-      const name: string | null =
-        (profile && "global_name" in profile && typeof (profile as { global_name?: unknown }).global_name === "string"
-          ? (profile as { global_name?: string }).global_name
-          : undefined) ??
-        (profile && "username" in profile && typeof (profile as { username?: unknown }).username === "string"
-          ? (profile as { username?: string }).username
-          : undefined) ??
-        null;
-
-      const email: string | null =
-        profile && "email" in profile && typeof (profile as { email?: unknown }).email === "string"
-          ? ((profile as { email?: string }).email ?? null)
-          : null;
-
-      let avatar: string | null = null;
-      if (
-        discordId &&
-        profile &&
-        "avatar" in profile &&
-        typeof (profile as { avatar?: unknown }).avatar === "string" &&
-        (profile as { avatar?: string | null }).avatar
-      ) {
-        const hash = (profile as DiscordProfile).avatar as string;
-        avatar = `https://cdn.discordapp.com/avatars/${discordId}/${hash}.png`;
-      }
+      const name = p?.global_name ?? p?.username ?? null;
+      const email = (p as { email?: string | null } | null)?.email ?? null;
+      const avatar = p?.avatar
+        ? `https://cdn.discordapp.com/avatars/${discordId}/${p.avatar}.png`
+        : null;
 
       await ensureTables();
       await sql/*sql*/`
-        INSERT INTO users (discord_id, name, email, avatar, last_login_at)
-        VALUES (${discordId}, ${name}, ${email}, ${avatar}, now())
+        INSERT INTO users (discord_id, name, email, avatar_url)
+        VALUES (${discordId}, ${name}, ${email}, ${avatar})
         ON CONFLICT (discord_id) DO UPDATE
         SET name = EXCLUDED.name,
             email = EXCLUDED.email,
-            avatar = EXCLUDED.avatar,
-            last_login_at = now();
+            avatar_url = EXCLUDED.avatar_url,
+            last_login_at = NOW();
       `;
     },
   },
-} as const;
+};
 
 const { handlers, auth } = NextAuth(authConfig);
 
 export { auth };
+// Экспортируем сразу GET/POST, чтобы роут мог их реэкспортировать
 export const { GET, POST } = handlers;
