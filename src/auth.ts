@@ -1,10 +1,8 @@
 // src/auth.ts
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
-import { ensureTables } from "@/lib/db";
 import { sql } from "@vercel/postgres";
 
-/** Узкий тайпгард для безопасного доступа к строковым полям */
 function getString(obj: unknown, key: string): string | undefined {
   if (obj && typeof obj === "object" && key in obj) {
     const v = (obj as Record<string, unknown>)[key];
@@ -66,7 +64,16 @@ const authConfig = {
         ? `https://cdn.discordapp.com/avatars/${pid}/${avatarHash}.png`
         : null;
 
-      await ensureTables();
+      // На входе пользователя убедимся, что таблицы есть и запишем пользователя
+      await sql/*sql*/`
+        CREATE TABLE IF NOT EXISTS users (
+          discord_id TEXT PRIMARY KEY,
+          name TEXT,
+          email TEXT,
+          avatar_url TEXT,
+          last_login_at TIMESTAMPTZ
+        );
+      `;
       await sql/*sql*/`
         INSERT INTO users (discord_id, name, email, avatar_url, last_login_at)
         VALUES (${pid}, ${name}, ${email}, ${avatar}, NOW())
