@@ -5,23 +5,26 @@ import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
-async function ensureSchema() {
-  // Создаем таблицы, если их нет
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS users (
-      discord_id TEXT PRIMARY KEY,
-      name TEXT,
-      email TEXT,
-      avatar_url TEXT,
-      last_login_at TIMESTAMPTZ
-    );
+async function tableExists(table: string): Promise<boolean> {
+  const { rows } = await sql/*sql*/`
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = ${table}
+    LIMIT 1;
   `;
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS uploaders (
-      discord_id TEXT PRIMARY KEY REFERENCES users(discord_id) ON DELETE CASCADE,
-      role TEXT NOT NULL
-    );
+  return rows.length > 0;
+}
+
+async function columnExists(table: string, column: string): Promise<boolean> {
+  const { rows } = await sql/*sql*/`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = ${table}
+      AND column_name = ${column}
+    LIMIT 1;
   `;
+  return rows.length > 0;
 }
 
 export async function GET() {
@@ -29,15 +32,22 @@ export async function GET() {
     const session = await auth();
     const me = session?.user?.id;
 
-    // Если не залогинен — отдаём пусто, чтобы UI не краснел
-    if (!me) return NextResponse.json({ users: [], reason: "unauthenticated" });
+    if (!me) {
+      // не залогинен — возвращаем пусто, UI не краснеет
+      return NextResponse.json({ users: [], reason: "unauthenticated" });
+    }
 
-    // Гарантируем схему (если ensureTables где-то не сработал)
-    await ensureSchema();
+    const hasUsers = await tableExists("users");
+    if (!hasUsers) {
+      // таблицы пользователей нет — вернем пусто
+      return NextResponse.json({ users: [] });
+    }
 
+    const hasAvatar = await columnExists("users", "avatar_url");
     const OWNER_ID = "1195944713639960601";
 
-    const { rows } = await sql/*sql*/`
+    // Два SQL-ветвления: с аватаром и без
+    const queryWithAvatar = sql/*sql*/`
       SELECT
         u.discord_id AS id,
         COALESCE(u.name, '') AS name,
@@ -50,6 +60,21 @@ export async function GET() {
       LIMIT 500;
     `;
 
+    const queryWithoutAvatar = sql/*sql*/`
+      SELECT
+        u.discord_id AS id,
+        COALESCE(u.name, '') AS name,
+        NULL AS avatar,
+        u.last_login_at AS last_seen,
+        CASE WHEN up.role = 'admin' THEN TRUE ELSE FALSE END AS is_admin
+      FROM users u
+      LEFT JOIN uploaders up ON up.discord_id = u.discord_id
+      ORDER BY u.last_login_at DESC NULLS LAST
+      LIMIT 500;
+    `;
+
+    const { rows } = await (hasAvatar ? queryWithAvatar : queryWithoutAvatar);
+
     const users = rows.map((r) => ({
       id: String(r.id),
       name: (r.name as string) || "Без имени",
@@ -61,7 +86,6 @@ export async function GET() {
 
     return NextResponse.json({ users });
   } catch (err) {
-    // На время диагностики вернем текст ошибки (потом можно убрать detail)
     return NextResponse.json(
       { users: [], error: "db_error", detail: String(err) },
       { status: 200 }
