@@ -1,12 +1,25 @@
 // src/auth.ts
-import NextAuth, { type NextAuthConfig } from "next-auth";
-import Discord, { type DiscordProfile } from "next-auth/providers/discord";
+import NextAuth, {
+  type NextAuthConfig,
+  type Profile,
+  type User,
+  type AdapterUser,
+} from "next-auth";
+import Discord from "next-auth/providers/discord";
 import type { JWT } from "next-auth/jwt";
 import type { Account, Session } from "next-auth";
 import { sql } from "@vercel/postgres";
 import { ensureTables } from "@/lib/db";
 
-// ВАЖНО: никакого `as const` здесь не используем
+// Профиль дискорда "как бы", без any
+type DiscordProfileLike = Profile & {
+  id?: string;
+  avatar?: string | null;
+  global_name?: string | null;
+  username?: string | null;
+  email?: string | null;
+};
+
 const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,
   providers: [
@@ -19,18 +32,33 @@ const authConfig: NextAuthConfig = {
   callbacks: {
     async jwt({
       token,
+      user, // v5 добавляет user — он нам не нужен, но должен быть в сигнатуре
       account,
       profile,
-    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
+    }: {
+      token: JWT;
+      user?: User | AdapterUser;
+      account?: Account | null;
+      profile?: Profile | undefined;
+    }) {
+      // access_token добавлен в Account через твой module augmentation
       if (account?.access_token) {
         (token as JWT & { accessToken?: string }).accessToken = account.access_token;
       }
-      if (profile?.id) {
-        (token as JWT & { discordId?: string }).discordId = profile.id;
+      const p = profile as DiscordProfileLike | undefined;
+      if (p?.id) {
+        (token as JWT & { discordId?: string }).discordId = p.id;
       }
       return token;
     },
-    async session({ session, token }: { session: Session; token: JWT }) {
+
+    async session({
+      session,
+      token,
+    }: {
+      session: Session;
+      token: JWT;
+    }) {
       const s = session as Session & { accessToken?: string; discordId?: string };
       const t = token as JWT & { accessToken?: string; discordId?: string };
       s.accessToken = t.accessToken;
@@ -38,15 +66,16 @@ const authConfig: NextAuthConfig = {
       return s;
     },
   },
+
   events: {
-    // сохраняем/обновляем пользователя в БД при логине
+    // сохраняем/обновляем пользователя при логине
     async signIn({ account, profile }) {
-      const p = profile as DiscordProfile | null | undefined;
+      const p = profile as DiscordProfileLike | undefined;
       const discordId = p?.id ?? account?.providerAccountId ?? null;
       if (!discordId) return;
 
       const name = p?.global_name ?? p?.username ?? null;
-      const email = (p as { email?: string | null } | null)?.email ?? null;
+      const email = p?.email ?? null;
       const avatar = p?.avatar
         ? `https://cdn.discordapp.com/avatars/${discordId}/${p.avatar}.png`
         : null;
@@ -68,5 +97,4 @@ const authConfig: NextAuthConfig = {
 const { handlers, auth } = NextAuth(authConfig);
 
 export { auth };
-// Экспортируем сразу GET/POST, чтобы роут мог их реэкспортировать
 export const { GET, POST } = handlers;
