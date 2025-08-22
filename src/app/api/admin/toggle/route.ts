@@ -1,18 +1,35 @@
-import { NextResponse } from "next/server";
+// src/app/api/admin/toggle/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { setAdmin, OWNER_ID } from "@/lib/adminStore";
+import { ensureTables, setUploader } from "@/lib/db";
+import { isSuperAdmin } from "@/lib/access";
 
-type SessionLike = { discordId?: string };
+export const dynamic = "force-dynamic";
 
-export async function POST(req: Request) {
-  const session = (await auth()) as unknown as SessionLike | null;
-  if (!session?.discordId || session.discordId !== OWNER_ID) {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+type Body = { id?: string; admin?: boolean };
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  const requester =
+    (session as unknown as { discordId?: string })?.discordId ?? null;
+
+  if (!isSuperAdmin(requester)) {
+    return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const { id, admin } = (await req.json()) as { id: string; admin: boolean };
-  if (!id) return NextResponse.json({ error: "NO_ID" }, { status: 400 });
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return new NextResponse("Bad JSON", { status: 400 });
+  }
 
-  await setAdmin(id, admin);
+  const id = body.id?.trim();
+  const admin = Boolean(body.admin);
+  if (!id) return new NextResponse("Missing id", { status: 400 });
+
+  await ensureTables();
+  await setUploader(id, admin);
+
   return NextResponse.json({ ok: true });
 }
