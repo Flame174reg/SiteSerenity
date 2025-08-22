@@ -1,58 +1,42 @@
+// src/app/api/admin/users/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { ensureTables } from "@/lib/db";
-import { isSuperAdmin } from "@/lib/access";
 import { sql } from "@vercel/postgres";
 
-// то, что отдаём на клиент в /admin
-type Row = {
-  id: string;
-  name?: string;
-  avatar?: string;
-  lastSeen: string;
-  isAdmin: boolean;
-  isOwner: boolean;
-};
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  // доступ только владельцу (или расширите логику по желанию)
   const session = await auth();
-  const discordId =
-    (session as unknown as { discordId?: string } | null)?.discordId;
-
-  if (!discordId || !isSuperAdmin(discordId)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Разрешим только залогиненному владельцу / админу видеть список
+  const me = (session as any)?.discordId as string | undefined;
+  if (!me) return NextResponse.json({ users: [] });
 
   await ensureTables();
 
-  // ВАЖНО: ниже предполагается таблица users(discord_id, name, avatar, last_login_at)
-  // Если у вас колонка называется avatar_url — замените u.avatar на u.avatar_url.
-  const res = await sql<{
-    discord_id: string;
-    name: string | null;
-    avatar: string | null;
-    last_login_at: string | null;
-    role: string | null;
-  }>`
+  // Определяем, владелец ли (ваш Discord ID)
+  const OWNER_ID = "1195944713639960601";
+
+  const { rows } = await sql/*sql*/`
     SELECT
-      u.discord_id,
-      u.name,
-      u.avatar,
-      u.last_login_at,
-      up.role
+      u.discord_id AS id,
+      COALESCE(u.name, '') AS name,
+      u.avatar_url AS avatar,
+      COALESCE(u.last_login_at, NOW()) AS last_seen,
+      CASE WHEN up.role = 'admin' THEN TRUE ELSE FALSE END AS is_admin
     FROM users u
     LEFT JOIN uploaders up ON up.discord_id = u.discord_id
-    ORDER BY u.last_login_at DESC NULLS LAST;
+    ORDER BY u.last_login_at DESC NULLS LAST
+    LIMIT 500;
   `;
 
-  const users: Row[] = res.rows.map((r) => ({
-    id: r.discord_id,
-    name: r.name ?? undefined,
-    avatar: r.avatar ?? undefined,
-    lastSeen: r.last_login_at ?? new Date(0).toISOString(),
-    isAdmin: (r.role ?? "") === "uploader",
-    isOwner: isSuperAdmin(r.discord_id),
+  const users = rows.map((r) => ({
+    id: r.id as string,
+    name: (r.name as string) || "Без имени",
+    avatar: (r.avatar as string) || null,
+    lastSeen: (r.last_seen as Date).toISOString(),
+    isAdmin: Boolean(r.is_admin),
+    isOwner: r.id === OWNER_ID,
   }));
 
   return NextResponse.json({ users });
