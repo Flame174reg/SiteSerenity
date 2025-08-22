@@ -100,6 +100,7 @@ export default function Sidebar() {
         </div>
 
         <nav className="p-3 space-y-1 text-sm">
+          <Item href="/admin">Админ-панель</Item>
           <Item href="/">Главная</Item>
 
           <div className="px-3 pt-2 pb-1 text-xs uppercase opacity-60">Памятки</div>
