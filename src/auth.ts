@@ -3,7 +3,6 @@ import NextAuth, {
   type NextAuthConfig,
   type Profile,
   type User,
-  type AdapterUser,
 } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import type { JWT } from "next-auth/jwt";
@@ -11,7 +10,7 @@ import type { Account, Session } from "next-auth";
 import { sql } from "@vercel/postgres";
 import { ensureTables } from "@/lib/db";
 
-// Профиль дискорда "как бы", без any
+// Упрощённое описание профиля Discord без any
 type DiscordProfileLike = Profile & {
   id?: string;
   avatar?: string | null;
@@ -32,18 +31,18 @@ const authConfig: NextAuthConfig = {
   callbacks: {
     async jwt({
       token,
-      user, // v5 добавляет user — он нам не нужен, но должен быть в сигнатуре
+      user: _user, // не используем, но оставляем в сигнатуре
       account,
       profile,
     }: {
       token: JWT;
-      user?: User | AdapterUser;
+      user?: User;
       account?: Account | null;
       profile?: Profile | undefined;
     }) {
-      // access_token добавлен в Account через твой module augmentation
       if (account?.access_token) {
-        (token as JWT & { accessToken?: string }).accessToken = account.access_token;
+        (token as JWT & { accessToken?: string }).accessToken =
+          account.access_token;
       }
       const p = profile as DiscordProfileLike | undefined;
       if (p?.id) {
@@ -52,14 +51,11 @@ const authConfig: NextAuthConfig = {
       return token;
     },
 
-    async session({
-      session,
-      token,
-    }: {
-      session: Session;
-      token: JWT;
-    }) {
-      const s = session as Session & { accessToken?: string; discordId?: string };
+    async session({ session, token }: { session: Session; token: JWT }) {
+      const s = session as Session & {
+        accessToken?: string;
+        discordId?: string;
+      };
       const t = token as JWT & { accessToken?: string; discordId?: string };
       s.accessToken = t.accessToken;
       s.discordId = t.discordId;
@@ -68,7 +64,6 @@ const authConfig: NextAuthConfig = {
   },
 
   events: {
-    // сохраняем/обновляем пользователя при логине
     async signIn({ account, profile }) {
       const p = profile as DiscordProfileLike | undefined;
       const discordId = p?.id ?? account?.providerAccountId ?? null;
