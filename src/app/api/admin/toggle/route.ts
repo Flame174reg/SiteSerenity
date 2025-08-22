@@ -1,35 +1,37 @@
 // src/app/api/admin/toggle/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { ensureTables, setUploader } from "@/lib/db";
-import { isSuperAdmin } from "@/lib/access";
+import { ensureTables } from "@/lib/db";
+import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
-type Body = { id?: string; admin?: boolean };
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const session = await auth();
-  const requester =
-    (session as unknown as { discordId?: string })?.discordId ?? null;
+  const me = (session as any)?.discordId as string | undefined;
+  if (!me) return NextResponse.json({ ok: false }, { status: 401 });
 
-  if (!isSuperAdmin(requester)) {
-    return new NextResponse("Forbidden", { status: 403 });
+  const OWNER_ID = "1195944713639960601";
+  if (me !== OWNER_ID) {
+    return NextResponse.json({ ok: false }, { status: 403 });
   }
 
-  let body: Body;
-  try {
-    body = (await req.json()) as Body;
-  } catch {
-    return new NextResponse("Bad JSON", { status: 400 });
+  const body = await req.json().catch(() => null) as { id?: string; admin?: boolean } | null;
+  if (!body?.id || typeof body.admin !== "boolean") {
+    return NextResponse.json({ ok: false }, { status: 400 });
   }
-
-  const id = body.id?.trim();
-  const admin = Boolean(body.admin);
-  if (!id) return new NextResponse("Missing id", { status: 400 });
 
   await ensureTables();
-  await setUploader(id, admin);
+
+  if (body.admin) {
+    await sql/*sql*/`
+      INSERT INTO uploaders (discord_id, role)
+      VALUES (${body.id}, 'admin')
+      ON CONFLICT (discord_id) DO UPDATE SET role = 'admin';
+    `;
+  } else {
+    await sql/*sql*/`DELETE FROM uploaders WHERE discord_id = ${body.id}`;
+  }
 
   return NextResponse.json({ ok: true });
 }
