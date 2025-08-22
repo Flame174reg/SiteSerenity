@@ -1,24 +1,36 @@
+// src/app/api/photo/can-upload/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { sql } from "@vercel/postgres";
+import { ensureTables } from "@/lib/db";
+import { isSuperAdmin } from "@/lib/access";
 
-// парсим список id из переменной окружения (через запятую / пробелы)
-function parseAdminIds(src?: string) {
-  return new Set(
-    (src ?? "")
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type SessionShape = { discordId?: string } | null;
 
 export async function GET() {
+  // получаем сессию и аккуратно достаём discordId без any
+  const session = (await auth()) as SessionShape;
+  const discordId = session?.discordId;
+
   // если не авторизован — запрет
-  const session = await auth().catch(() => null);
-  const discordId = (session as any)?.discordId as string | undefined;
+  if (!discordId) {
+    return NextResponse.json({ allowed: false }, { status: 401 });
+  }
 
-  const admins = parseAdminIds(process.env.ADMIN_DISCORD_IDS);
-  const allowed = !!discordId && admins.has(discordId);
+  // убеждаемся, что таблицы есть
+  await ensureTables();
 
-  // фронт ждёт { allowed: boolean }
+  // проверяем наличие в списке аплоадеров или суперадмина
+  const res = await sql<{ exists: number }>`
+    SELECT 1 as exists
+    FROM uploaders
+    WHERE discord_id = ${discordId}
+    LIMIT 1
+  `;
+  const allowed = res.rowCount > 0 || isSuperAdmin(discordId);
+
   return NextResponse.json({ allowed });
 }
