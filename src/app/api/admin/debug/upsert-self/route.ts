@@ -53,12 +53,12 @@ export async function POST() {
     // 2) Читаем доступные колонки
     const cols = await getExistingColumns("users"); // например: discord_id, name, last_login_at
 
-    // 3) Собираем данные из сессии
+    // 3) Данные из сессии
     const discord_id = session.user.id;
     const name = getString(session.user as unknown, "name") ?? null;
     const email = getString(session.user as unknown, "email") ?? null;
 
-    // 4) Конструируем INSERT/UPSERT только по существующим колонкам
+    // 4) Динамический UPSERT только по существующим колонкам
     const fields: string[] = ["discord_id"];
     const values: string[] = [`'${discord_id.replace(/'/g, "''")}'`];
 
@@ -71,16 +71,14 @@ export async function POST() {
       values.push(email === null ? "NULL" : `'${email.replace(/'/g, "''")}'`);
     }
     if (cols.has("avatar_url")) {
-      // аватар сейчас не знаем — оставим NULL; при полном логине через Discord он обновится
       fields.push("avatar_url");
-      values.push("NULL");
+      values.push("NULL"); // аватар не знаем тут (обновится при полном входе)
     }
     if (cols.has("last_login_at")) {
       fields.push("last_login_at");
       values.push("NOW()");
     }
 
-    // ON CONFLICT — обновляем только те поля, что есть
     const setUpdates = fields
       .filter((f) => f !== "discord_id")
       .map((f) => `${f} = EXCLUDED.${f}`)
@@ -92,7 +90,7 @@ export async function POST() {
       ON CONFLICT (discord_id) DO UPDATE SET ${setUpdates};
     `;
 
-    await sql.unsafe(query);
+    await sql.query(query);
     return NextResponse.json({ ok: true, id: discord_id });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
