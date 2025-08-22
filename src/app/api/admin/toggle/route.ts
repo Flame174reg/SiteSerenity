@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const session = await auth();
-  const me = session?.discordId; // без any
+  const me = session?.user?.id;
   if (!me) return NextResponse.json({ ok: false }, { status: 401 });
 
   const OWNER_ID = "1195944713639960601";
