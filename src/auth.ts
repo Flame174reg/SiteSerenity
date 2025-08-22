@@ -16,38 +16,53 @@ const authConfig = {
 
   callbacks: {
     async jwt({ token, account, profile }) {
+      // access_token с OAuth-аккаунта → в JWT
       if (account?.access_token) {
-        // @ts-expect-error - добавляем кастомное поле accessToken в JWT
-        token.accessToken = account.access_token;
+        token.accessToken = String(account.access_token);
       }
-      // @ts-expect-error - у discord-профиля есть id, кладём в JWT
-      if (profile?.id) token.discordId = profile.id as string;
+
+      // Безопасно достаем discord id из профиля
+      const anyProfile = profile as Record<string, unknown> | null | undefined;
+      const pId =
+        anyProfile && typeof anyProfile.id === "string" ? anyProfile.id : undefined;
+      if (pId) token.discordId = pId;
+
       return token;
     },
 
     async session({ session, token }) {
-      // @ts-expect-error - совместим с расширением Session (next-auth.d.ts)
-      session.accessToken = token.accessToken as string | undefined;
-      // @ts-expect-error - совместим с расширением Session (next-auth.d.ts)
-      session.discordId = token.discordId as string | undefined;
+      if (token.accessToken) session.accessToken = token.accessToken;
+      if (typeof token.discordId === "string") {
+        session.discordId = token.discordId;          // если используешь отдельно
+        if (session.user) session.user.id = token.discordId; // дублируем в user.id
+      }
       return session;
     },
   },
 
   events: {
     async signIn({ profile, account }) {
-      // аккуратно вытаскиваем discordId
+      // Аккуратно вытаскиваем значения из profile/account
+      const p = profile as Record<string, unknown> | null | undefined;
+
       const discordId =
-        // @ts-expect-error - у discord-профиля есть id
-        profile?.id ?? account?.providerAccountId;
+        (p && typeof p.id === "string" ? p.id : undefined) ??
+        (account && typeof account.providerAccountId === "string"
+          ? account.providerAccountId
+          : undefined);
+
       if (!discordId) return;
 
-      // @ts-expect-error - у discord профиля global_name|username
-      const name = profile?.global_name ?? profile?.username ?? null;
-      // @ts-expect-error - стандартное поле email
-      const email = profile?.email ?? null;
-      // @ts-expect-error - хэш аватара в discord
-      const avatarHash = profile?.avatar ?? null;
+      const name =
+        (p && typeof p.global_name === "string" ? p.global_name : undefined) ??
+        (p && typeof p.username === "string" ? p.username : undefined) ??
+        null;
+
+      const email =
+        (p && typeof p.email === "string" ? p.email : undefined) ?? null;
+
+      const avatarHash =
+        (p && typeof p.avatar === "string" ? p.avatar : undefined) ?? null;
 
       const avatar = avatarHash
         ? `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.png`
