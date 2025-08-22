@@ -1,45 +1,83 @@
 // src/lib/db.ts
 import { sql } from "@vercel/postgres";
 
-/**
- * Создаёт все необходимые таблицы, если их ещё нет.
- * Вызывай перед любыми операциями с БД (например, в auth events, API-роутах).
- */
 export async function ensureTables() {
-  // Пользователи, авторизованные через Discord
-  await sql/*sql*/`
+  await sql`
     CREATE TABLE IF NOT EXISTS users (
-      discord_id     TEXT PRIMARY KEY,
-      name           TEXT,
-      email          TEXT,
-      avatar_url     TEXT,
-      created_at     TIMESTAMPTZ DEFAULT now(),
-      last_login_at  TIMESTAMPTZ DEFAULT now()
+      discord_id TEXT PRIMARY KEY,
+      name TEXT,
+      avatar TEXT,
+      last_login_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
-
-  // Те, кому разрешена загрузка фото (админы раздела "Недельный актив")
-  await sql/*sql*/`
+  await sql`
     CREATE TABLE IF NOT EXISTS uploaders (
-      discord_id  TEXT PRIMARY KEY,
-      role        TEXT DEFAULT 'uploader',      -- для будущего расширения (uploader/admin и т.п.)
-      granted_by  TEXT,                         -- кто выдал доступ (discord_id)
-      granted_at  TIMESTAMPTZ DEFAULT now()
+      discord_id TEXT PRIMARY KEY,
+      role TEXT DEFAULT 'uploader'
     );
   `;
-
-  // Фото "Недельного актива"
-  await sql/*sql*/`
+  await sql`
     CREATE TABLE IF NOT EXISTS weekly_photos (
-      id           SERIAL PRIMARY KEY,
-      url          TEXT NOT NULL,
-      description  TEXT,
-      discord_id   TEXT,                        -- кто загрузил (можно связать с users)
-      created_at   TIMESTAMPTZ DEFAULT now()
+      id SERIAL PRIMARY KEY,
+      url TEXT NOT NULL,
+      discord_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+}
 
-  // Полезные индексы (idempotent — не упадут, если уже есть)
-  await sql/*sql*/`CREATE INDEX IF NOT EXISTS weekly_photos_created_at_idx ON weekly_photos (created_at DESC);`;
-  await sql/*sql*/`CREATE INDEX IF NOT EXISTS users_last_login_at_idx ON users (last_login_at DESC);`;
+// ——— helpers ———
+
+export type DBUser = {
+  discord_id: string;
+  name: string | null;
+  avatar: string | null;
+  last_login_at: string; // ISO
+};
+
+export async function upsertUser(
+  discordId: string,
+  name: string | null,
+  avatar: string | null
+): Promise<void> {
+  await ensureTables();
+  await sql`
+    INSERT INTO users (discord_id, name, avatar, last_login_at)
+    VALUES (${discordId}, ${name}, ${avatar}, NOW())
+    ON CONFLICT (discord_id) DO UPDATE
+      SET name = EXCLUDED.name,
+          avatar = EXCLUDED.avatar,
+          last_login_at = NOW();
+  `;
+}
+
+export async function listUsersForAdmin(): Promise<DBUser[]> {
+  await ensureTables();
+  const res = await sql<DBUser>`
+    SELECT discord_id, name, avatar, last_login_at
+    FROM users
+    ORDER BY last_login_at DESC
+  `;
+  return res.rows;
+}
+
+export async function setUploader(id: string, admin: boolean): Promise<void> {
+  await ensureTables();
+  if (admin) {
+    await sql`
+      INSERT INTO uploaders (discord_id)
+      VALUES (${id})
+      ON CONFLICT (discord_id) DO NOTHING
+    `;
+  } else {
+    await sql`DELETE FROM uploaders WHERE discord_id = ${id}`;
+  }
+}
+
+export async function isUploader(id: string): Promise<boolean> {
+  await ensureTables();
+  const res = await sql`
+    SELECT 1 FROM uploaders WHERE discord_id = ${id} LIMIT 1
+  `;
+  return (res.rowCount ?? 0) > 0;
 }
