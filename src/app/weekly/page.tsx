@@ -1,78 +1,75 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-"use client";
+// src/app/weekly/page.tsx
+import { auth } from "@/auth";
+import Image from "next/image";
+import UploadClient from "./upload.client";
 
-import { useEffect, useState } from "react";
+async function fetchItems(category?: string) {
+  const url = new URL(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/weekly/list`, "http://localhost");
+  if (category) url.searchParams.set("category", category);
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/api/weekly/list` : "/api/weekly/list"}${category ? `?category=${encodeURIComponent(category)}` : ""}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({ items: [] as any[] }));
+  return Array.isArray(data.items) ? data.items : [];
+}
 
-type WeeklyPhoto = { url: string; author: string; createdAt: string };
+export default async function WeeklyPage({ searchParams }: { searchParams: { category?: string } }) {
+  const session = await auth();
+  const isLogged = Boolean(session);
+  const myId = session?.user?.id ?? null;
 
-export default function WeeklyPage() {
-  const [photos, setPhotos] = useState<WeeklyPhoto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/photo/list", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: any = await res.json();
-
-        const list: WeeklyPhoto[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.photos)
-          ? data.photos
-          : [];
-
-        setPhotos(list.filter(p => typeof p?.url === "string"));
-      } catch (e: any) {
-        setError(e?.message || "Ошибка загрузки");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  // Простейшая проверка админа на клиенте мы не делаем — решает API.
+  const category = (searchParams?.category || "").trim().toLowerCase();
+  const items = await fetchItems(category);
 
   return (
-    <main className="px-6 py-10">
-      <div className="mx-auto max-w-5xl">
-        <h1 className="text-3xl font-bold mb-6">Недельный актив</h1>
+    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+      <h1 className="text-2xl font-semibold">Weekly gallery {category ? `— ${category}` : ""}</h1>
 
-        {loading && <div className="opacity-70">Загрузка…</div>}
+      {isLogged ? (
+        <div className="text-sm text-gray-500">
+          Вы вошли как: <span className="font-mono">{myId}</span>
+        </div>
+      ) : (
+        <div className="text-sm text-gray-500">
+          Войдите через Discord, чтобы загружать изображения (если вы администратор).
+        </div>
+      )}
 
-        {error && (
-          <div className="text-red-400">
-            Не удалось загрузить список фото: {error}
-          </div>
+      {/* Форма загрузки рендерится всегда, но сама загрузка ограничена API (403 не-админам) */}
+      <UploadClient defaultCategory={category} />
+
+      <div className="border-t pt-4">
+        <div className="mb-3 text-sm">
+          Категория (query): <code>?category=&lt;name&gt;</code>. Если не указана — показываем все под `weekly/`.
+        </div>
+
+        {items.length === 0 ? (
+          <div className="text-gray-500">Здесь пока пусто.</div>
+        ) : (
+          <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {items.map((it: any) => (
+              <li key={it.key} className="group relative border rounded-lg overflow-hidden">
+                <a href={it.url} target="_blank" rel="noreferrer">
+                  {/* next/image для оптимизации */}
+                  <Image
+                    src={it.url}
+                    alt={it.key}
+                    width={600}
+                    height={400}
+                    className="object-cover w-full h-48"
+                  />
+                </a>
+                <div className="p-2 text-xs text-gray-600 break-all">
+                  {it.key}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
-
-        {!loading && !error && photos.length === 0 && (
-          <div className="opacity-70">Пока нет фотографий.</div>
-        )}
-
-        <ul className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {photos.map((p, i) => (
-            <li
-              key={`${p.url}-${i}`}
-              className="rounded-xl overflow-hidden border border-white/10 bg-white/5"
-            >
-              <div className="aspect-[4/3] bg-black/30">
-                <img
-                  src={p.url}
-                  alt={p.author ? `Фото от ${p.author}` : "Фото отчёта"}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              </div>
-              <div className="p-3 text-sm flex items-center justify-between">
-                <span className="opacity-80">{p.author || "Неизвестный автор"}</span>
-                <time className="opacity-60">
-                  {p.createdAt ? new Date(p.createdAt).toLocaleString("ru-RU") : ""}
-                </time>
-              </div>
-            </li>
-          ))}
-        </ul>
       </div>
-    </main>
+    </div>
   );
 }
