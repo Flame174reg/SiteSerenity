@@ -10,18 +10,20 @@ export async function GET() {
   try {
     const session = await auth();
     const me = session?.user?.id;
-    // Гостям просто отдаем пустой список, чтобы UI не краснел
-    if (!me) return NextResponse.json({ users: [] });
+
+    // Если не залогинен — отдаем пусто (UI не краснеет)
+    if (!me) return NextResponse.json({ users: [], reason: "unauthenticated" });
 
     await ensureTables();
 
     const OWNER_ID = "1195944713639960601";
+
     const { rows } = await sql/*sql*/`
       SELECT
         u.discord_id AS id,
         COALESCE(u.name, '') AS name,
         u.avatar_url AS avatar,
-        COALESCE(u.last_login_at, NOW()) AS last_seen,
+        u.last_login_at AS last_seen,
         CASE WHEN up.role = 'admin' THEN TRUE ELSE FALSE END AS is_admin
       FROM users u
       LEFT JOIN uploaders up ON up.discord_id = u.discord_id
@@ -33,7 +35,7 @@ export async function GET() {
       id: String(r.id),
       name: (r.name as string) || "Без имени",
       avatar: (r.avatar as string) || null,
-      lastSeen: new Date(r.last_seen as string | Date).toISOString(),
+      lastSeen: r.last_seen ? new Date(r.last_seen as string | Date).toISOString() : null,
       isAdmin: Boolean(r.is_admin),
       isOwner: String(r.id) === OWNER_ID,
     }));
@@ -41,7 +43,7 @@ export async function GET() {
     return NextResponse.json({ users });
   } catch (err) {
     console.error("GET /api/admin/users failed:", err);
-    // Возвращаем 200, чтобы клиент не рисовал красную ошибку
+    // Возвращаем 200, чтобы клиент не рисовал ошибку
     return NextResponse.json({ users: [], error: "db_error" });
   }
 }
