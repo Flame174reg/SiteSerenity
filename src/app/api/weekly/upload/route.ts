@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "no_file" }, { status: 400 });
     }
     if (!category || /[^\w\-]/.test(category)) {
-      // только буквы/цифры/подчёркивание/дефис — чтобы не городить странные пути
+      // только буквы/цифры/подчёркивание/дефис
       return NextResponse.json({ ok: false, reason: "bad_category" }, { status: 400 });
     }
 
@@ -45,9 +45,15 @@ export async function POST(req: Request) {
     if (!token)
       return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
 
-    // заливаем как public
+    // Заливаем как public
     const uploaded = await put(key, file, { access: "public", token });
-    return NextResponse.json({ ok: true, key, url: uploaded.url, size: uploaded.size });
+
+    return NextResponse.json({
+      ok: true,
+      key,
+      url: uploaded.url,
+      size: file.size, // у результата put нет поля size — используем размер исходного файла
+    });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
