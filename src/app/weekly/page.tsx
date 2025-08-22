@@ -2,12 +2,17 @@
 import { auth } from "@/auth";
 import Image from "next/image";
 
+// ===== Types =====
 type WeeklyItem = {
   url: string;
   key: string;
   uploadedAt?: string;
   size?: number;
 };
+
+type RawSearchParams =
+  | Record<string, string | string[] | undefined>
+  | undefined;
 
 function isWeeklyItemArray(x: unknown): x is WeeklyItem[] {
   return (
@@ -22,9 +27,9 @@ function isWeeklyItemArray(x: unknown): x is WeeklyItem[] {
   );
 }
 
+// ===== Data =====
 async function fetchItems(category?: string): Promise<WeeklyItem[]> {
   const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  // Для SSR предпочитаем абсолютный URL при наличии NEXT_PUBLIC_BASE_URL.
   const base = process.env.NEXT_PUBLIC_BASE_URL;
   const endpoint = base ? `${base}/api/weekly/list${qs}` : `/api/weekly/list${qs}`;
   const res = await fetch(endpoint, { cache: "no-store" });
@@ -34,15 +39,19 @@ async function fetchItems(category?: string): Promise<WeeklyItem[]> {
   return isWeeklyItemArray(items) ? items : [];
 }
 
+// ===== Page (Next 15: searchParams can be Promise) =====
 export default async function WeeklyPage({
   searchParams,
 }: {
-  searchParams: { category?: string };
+  searchParams: Promise<RawSearchParams>;
 }) {
+  const sp = (await searchParams) || {};
+  const rawCat = Array.isArray(sp.category) ? sp.category[0] : sp.category;
+  const category = (rawCat || "").trim().toLowerCase();
+
   const session = await auth();
   const myId = session?.user?.id ?? null;
 
-  const category = (searchParams?.category || "").trim().toLowerCase();
   const items = await fetchItems(category);
 
   return (
@@ -84,7 +93,6 @@ export default async function WeeklyPage({
                     width={600}
                     height={400}
                     className="object-cover w-full h-48"
-                    // Можно добавить priority для LCP-изображений категории
                   />
                 </a>
                 <div className="p-2 text-xs text-gray-600 break-all">{it.key}</div>
@@ -97,5 +105,5 @@ export default async function WeeklyPage({
   );
 }
 
-// Отдельный импорт клиентского компонента, чтобы TS не путался с типами
+// Отдельный импорт клиентского компонента — вниз файла, чтобы TS не путался
 import UploadClient from "./upload.client";
