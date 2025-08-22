@@ -4,7 +4,7 @@ import Discord from "next-auth/providers/discord";
 import { ensureTables } from "@/lib/db";
 import { sql } from "@vercel/postgres";
 
-/** Узкий тайпгард для безопасного доступа к полям в unknown-объектах */
+/** Узкий тайпгард для безопасного доступа к строковым полям */
 function getString(obj: unknown, key: string): string | undefined {
   if (obj && typeof obj === "object" && key in obj) {
     const v = (obj as Record<string, unknown>)[key];
@@ -25,11 +25,9 @@ const authConfig = {
 
   callbacks: {
     async jwt({ token, account, profile }) {
-      // access_token -> JWT
       const access = getString(account as unknown, "access_token");
       if (access) token.accessToken = access;
 
-      // discord id -> JWT
       const pid = getString(profile as unknown, "id");
       if (pid) token.discordId = pid;
 
@@ -37,7 +35,6 @@ const authConfig = {
     },
 
     async session({ session, token }) {
-      // безопасно читаем потенциально неописанные поля токена
       const access = getString(token as unknown, "accessToken");
       const did = getString(token as unknown, "discordId");
 
