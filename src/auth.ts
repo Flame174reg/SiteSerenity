@@ -10,48 +10,45 @@ const authConfig = {
     Discord({
       clientId: process.env.DISCORD_CLIENT_ID!,
       clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-      authorization: { params: { scope: "identify email" } }, // guilds не обязателен тут
+      authorization: { params: { scope: "identify email" } },
     }),
   ],
 
   callbacks: {
-    // НИЧЕГО не типизируем у параметров — даём lib самой подставить тип
     async jwt({ token, account, profile }) {
       if (account?.access_token) {
-        // @ts-expect-error — поля добавлены через module augmentation
+        // @ts-expect-error - добавляем кастомное поле accessToken в JWT
         token.accessToken = account.access_token;
       }
-      // Discord id
-      // @ts-expect-error — profile типизирован либой, поле есть у Discord
+      // @ts-expect-error - у discord-профиля есть id, кладём в JWT
       if (profile?.id) token.discordId = profile.id as string;
       return token;
     },
 
     async session({ session, token }) {
-      // @ts-expect-error — поля добавлены через module augmentation
+      // @ts-expect-error - совместим с расширением Session (next-auth.d.ts)
       session.accessToken = token.accessToken as string | undefined;
-      // @ts-expect-error — поля добавлены через module augmentation
+      // @ts-expect-error - совместим с расширением Session (next-auth.d.ts)
       session.discordId = token.discordId as string | undefined;
       return session;
     },
   },
 
   events: {
-    // При любом успешном входе — апсертим пользователя в users
     async signIn({ profile, account }) {
+      // аккуратно вытаскиваем discordId
       const discordId =
-        // @ts-expect-error — у Discord профиля есть id
-        profile?.id || account?.providerAccountId;
+        // @ts-expect-error - у discord-профиля есть id
+        profile?.id ?? account?.providerAccountId;
       if (!discordId) return;
 
-      // Имя
-      // @ts-expect-error
+      // @ts-expect-error - у discord профиля global_name|username
       const name = profile?.global_name ?? profile?.username ?? null;
-      // @ts-expect-error
+      // @ts-expect-error - стандартное поле email
       const email = profile?.email ?? null;
-      // Аватар
-      // @ts-expect-error
+      // @ts-expect-error - хэш аватара в discord
       const avatarHash = profile?.avatar ?? null;
+
       const avatar = avatarHash
         ? `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.png`
         : null;
@@ -71,7 +68,5 @@ const authConfig = {
 } satisfies NextAuthConfig;
 
 const { handlers, auth } = NextAuth(authConfig);
-
 export { auth, handlers };
-// Удобно сразу экспортнуть GET/POST — на случай если вы захотите импортировать именно их
 export const { GET, POST } = handlers;
