@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 import { ensureTables } from "@/lib/db";
