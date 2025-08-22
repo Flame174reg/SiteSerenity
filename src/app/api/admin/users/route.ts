@@ -7,35 +7,41 @@ import { sql } from "@vercel/postgres";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await auth();
-  const me = session?.user?.id;
-  if (!me) return NextResponse.json({ users: [] });
+  try {
+    const session = await auth();
+    const me = session?.user?.id;
+    // Гостям просто отдаем пустой список, чтобы UI не краснел
+    if (!me) return NextResponse.json({ users: [] });
 
-  await ensureTables();
+    await ensureTables();
 
-  const OWNER_ID = "1195944713639960601";
+    const OWNER_ID = "1195944713639960601";
+    const { rows } = await sql/*sql*/`
+      SELECT
+        u.discord_id AS id,
+        COALESCE(u.name, '') AS name,
+        u.avatar_url AS avatar,
+        COALESCE(u.last_login_at, NOW()) AS last_seen,
+        CASE WHEN up.role = 'admin' THEN TRUE ELSE FALSE END AS is_admin
+      FROM users u
+      LEFT JOIN uploaders up ON up.discord_id = u.discord_id
+      ORDER BY u.last_login_at DESC NULLS LAST
+      LIMIT 500;
+    `;
 
-  const { rows } = await sql/*sql*/`
-    SELECT
-      u.discord_id AS id,
-      COALESCE(u.name, '') AS name,
-      u.avatar_url AS avatar,
-      COALESCE(u.last_login_at, NOW()) AS last_seen,
-      CASE WHEN up.role = 'admin' THEN TRUE ELSE FALSE END AS is_admin
-    FROM users u
-    LEFT JOIN uploaders up ON up.discord_id = u.discord_id
-    ORDER BY u.last_login_at DESC NULLS LAST
-    LIMIT 500;
-  `;
+    const users = rows.map((r) => ({
+      id: String(r.id),
+      name: (r.name as string) || "Без имени",
+      avatar: (r.avatar as string) || null,
+      lastSeen: new Date(r.last_seen as string | Date).toISOString(),
+      isAdmin: Boolean(r.is_admin),
+      isOwner: String(r.id) === OWNER_ID,
+    }));
 
-  const users = rows.map((r) => ({
-    id: r.id as string,
-    name: (r.name as string) || "Без имени",
-    avatar: (r.avatar as string) || null,
-    lastSeen: (r.last_seen as Date).toISOString(),
-    isAdmin: Boolean(r.is_admin),
-    isOwner: (r.id as string) === OWNER_ID,
-  }));
-
-  return NextResponse.json({ users });
+    return NextResponse.json({ users });
+  } catch (err) {
+    console.error("GET /api/admin/users failed:", err);
+    // Возвращаем 200, чтобы клиент не рисовал красную ошибку
+    return NextResponse.json({ users: [], error: "db_error" });
+  }
 }
