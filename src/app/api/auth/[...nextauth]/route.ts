@@ -1,2 +1,3 @@
 // src/app/api/auth/[...nextauth]/route.ts
-export { GET, POST } from "@/auth";
+// Ничего не импортируем как handlers — просто реэкспортируем готовые методы
+export { GET, POST } from "../../../../auth";
