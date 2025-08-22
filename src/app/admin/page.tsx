@@ -1,19 +1,27 @@
+// src/app/admin/page.tsx
 import { auth } from "@/auth";
-import { OWNER_ID } from "@/lib/adminStore";
 import AdminClient from "./ui/AdminClient";
 
-export const metadata = { title: "Админ-панель" };
-
-type SessionLike = { discordId?: string };
-
 export default async function AdminPage() {
-  const session = (await auth()) as unknown as SessionLike | null;
-  if (!session?.discordId || session.discordId !== OWNER_ID) {
+  const session = await auth();
+  const me = (session as any)?.discordId as string | undefined;
+  const OWNER_ID = "1195944713639960601";
+
+  if (!me) {
     return (
       <main className="px-6 py-10">
-        <div className="mx-auto max-w-4xl">
-          <h1 className="text-2xl font-bold">Доступ запрещён</h1>
-          <p className="opacity-70 mt-2">Эта страница доступна только владельцу.</p>
+        <div className="mx-auto max-w-3xl">
+          <p className="opacity-70">Нужно войти через Discord.</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (me !== OWNER_ID) {
+    return (
+      <main className="px-6 py-10">
+        <div className="mx-auto max-w-3xl">
+          <p className="opacity-70">Доступ только для владельца.</p>
         </div>
       </main>
     );
@@ -21,8 +29,9 @@ export default async function AdminPage() {
 
   return (
     <main className="px-6 py-10">
-      <div className="mx-auto max-w-4xl">
-        <h1 className="text-3xl font-bold mb-6">Админ-панель</h1>
+      <div className="mx-auto max-w-3xl space-y-4">
+        <h1 className="text-2xl font-bold">Администрирование</h1>
+        <p className="opacity-70 text-sm">Выбирайте, кому разрешены загрузки фото (роль «Админ»).</p>
         <AdminClient />
       </div>
     </main>
