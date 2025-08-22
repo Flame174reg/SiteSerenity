@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { auth } from "@/auth"; // у вас уже есть src/auth.ts
 import Link from "next/link";
 
