@@ -1,20 +1,39 @@
 // src/app/api/admin/users/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { ensureTables } from "@/lib/db";
 import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
+
+async function ensureSchema() {
+  // Создаем таблицы, если их нет
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS users (
+      discord_id TEXT PRIMARY KEY,
+      name TEXT,
+      email TEXT,
+      avatar_url TEXT,
+      last_login_at TIMESTAMPTZ
+    );
+  `;
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS uploaders (
+      discord_id TEXT PRIMARY KEY REFERENCES users(discord_id) ON DELETE CASCADE,
+      role TEXT NOT NULL
+    );
+  `;
+}
 
 export async function GET() {
   try {
     const session = await auth();
     const me = session?.user?.id;
 
-    // Если не залогинен — отдаем пусто (UI не краснеет)
+    // Если не залогинен — отдаём пусто, чтобы UI не краснел
     if (!me) return NextResponse.json({ users: [], reason: "unauthenticated" });
 
-    await ensureTables();
+    // Гарантируем схему (если ensureTables где-то не сработал)
+    await ensureSchema();
 
     const OWNER_ID = "1195944713639960601";
 
@@ -42,8 +61,10 @@ export async function GET() {
 
     return NextResponse.json({ users });
   } catch (err) {
-    console.error("GET /api/admin/users failed:", err);
-    // Возвращаем 200, чтобы клиент не рисовал ошибку
-    return NextResponse.json({ users: [], error: "db_error" });
+    // На время диагностики вернем текст ошибки (потом можно убрать detail)
+    return NextResponse.json(
+      { users: [], error: "db_error", detail: String(err) },
+      { status: 200 }
+    );
   }
 }
