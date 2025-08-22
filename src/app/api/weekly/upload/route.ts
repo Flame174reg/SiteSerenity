@@ -21,8 +21,10 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     const me = session?.user?.id;
-    if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
-    if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+    if (!me)
+      return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
+    if (!(await isAdmin(me)))
+      return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
     const form = await req.formData();
     const file = form.get("file");
@@ -36,12 +38,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "bad_category" }, { status: 400 });
     }
 
-    const ext = (file.name.split(".").pop() || "bin").toLowerCase();
     const safeName = file.name.replace(/[^\w.\-]+/g, "_");
     const key = `weekly/${category}/${Date.now()}_${safeName}`;
 
     const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token) return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
+    if (!token)
+      return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
 
     // заливаем как public
     const uploaded = await put(key, file, { access: "public", token });
