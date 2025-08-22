@@ -1,10 +1,27 @@
 // src/app/api/admin/toggle/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { ensureTables } from "@/lib/db";
 import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
+
+async function ensureSchema() {
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS users (
+      discord_id TEXT PRIMARY KEY,
+      name TEXT,
+      email TEXT,
+      avatar_url TEXT,
+      last_login_at TIMESTAMPTZ
+    );
+  `;
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS uploaders (
+      discord_id TEXT PRIMARY KEY REFERENCES users(discord_id) ON DELETE CASCADE,
+      role TEXT NOT NULL
+    );
+  `;
+}
 
 export async function POST(req: Request) {
   try {
@@ -23,7 +40,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false }, { status: 400 });
     }
 
-    await ensureTables();
+    await ensureSchema();
 
     if (body.admin) {
       await sql/*sql*/`
@@ -37,7 +54,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("POST /api/admin/toggle failed:", err);
-    return NextResponse.json({ ok: false }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "db_error", detail: String(err) },
+      { status: 200 }
+    );
   }
 }
