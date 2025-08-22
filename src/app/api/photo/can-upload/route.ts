@@ -1,4 +1,3 @@
-// src/app/api/photo/can-upload/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
@@ -11,26 +10,23 @@ export const dynamic = "force-dynamic";
 type SessionShape = { discordId?: string } | null;
 
 export async function GET() {
-  // получаем сессию и аккуратно достаём discordId без any
   const session = (await auth()) as SessionShape;
   const discordId = session?.discordId;
 
-  // если не авторизован — запрет
   if (!discordId) {
     return NextResponse.json({ allowed: false }, { status: 401 });
   }
 
-  // убеждаемся, что таблицы есть
   await ensureTables();
 
-  // проверяем наличие в списке аплоадеров или суперадмина
-  const res = await sql<{ exists: number }>`
-    SELECT 1 as exists
+  // Проверяем доступ через наличие записи или суперадмина
+  const { rows } = await sql<{ exists: number }>`
+    SELECT 1 AS exists
     FROM uploaders
     WHERE discord_id = ${discordId}
     LIMIT 1
   `;
-  const allowed = res.rowCount > 0 || isSuperAdmin(discordId);
+  const allowed = rows.length > 0 || isSuperAdmin(discordId);
 
   return NextResponse.json({ allowed });
 }
