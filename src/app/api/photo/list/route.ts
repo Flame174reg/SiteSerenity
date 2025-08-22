@@ -1,4 +1,5 @@
 // src/app/api/photo/list/route.ts
+export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 
 type WeeklyPhoto = {
