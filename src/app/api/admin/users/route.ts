@@ -8,13 +8,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await auth();
-  // Разрешим только залогиненному владельцу / админу видеть список
-  const me = (session as any)?.discordId as string | undefined;
+  const me = session?.discordId; // без any
   if (!me) return NextResponse.json({ users: [] });
 
   await ensureTables();
 
-  // Определяем, владелец ли (ваш Discord ID)
   const OWNER_ID = "1195944713639960601";
 
   const { rows } = await sql/*sql*/`
@@ -36,7 +34,7 @@ export async function GET() {
     avatar: (r.avatar as string) || null,
     lastSeen: (r.last_seen as Date).toISOString(),
     isAdmin: Boolean(r.is_admin),
-    isOwner: r.id === OWNER_ID,
+    isOwner: (r.id as string) === OWNER_ID,
   }));
 
   return NextResponse.json({ users });
