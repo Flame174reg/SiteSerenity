@@ -16,25 +16,28 @@ const authConfig = {
 
   callbacks: {
     async jwt({ token, account, profile }) {
-      // access_token с OAuth-аккаунта → в JWT
       if (account?.access_token) {
         token.accessToken = String(account.access_token);
       }
 
-      // Безопасно достаем discord id из профиля
-      const anyProfile = profile as Record<string, unknown> | null | undefined;
-      const pId =
-        anyProfile && typeof anyProfile.id === "string" ? anyProfile.id : undefined;
-      if (pId) token.discordId = pId;
+      const p = profile as Record<string, unknown> | null | undefined;
+      const pid = p && typeof p.id === "string" ? p.id : undefined;
+      if (pid) token.discordId = pid;
 
       return token;
     },
 
     async session({ session, token }) {
-      if (token.accessToken) session.accessToken = token.accessToken;
-      if (typeof token.discordId === "string") {
-        session.discordId = token.discordId;          // если используешь отдельно
-        if (session.user) session.user.id = token.discordId; // дублируем в user.id
+      // КРИТИЧЕСКАЯ ПРАВКА: нормализуем тип accessToken
+      session.accessToken =
+        typeof (token as any).accessToken === "string"
+          ? ((token as any).accessToken as string)
+          : undefined;
+
+      if (typeof (token as any).discordId === "string") {
+        const did = (token as any).discordId as string;
+        session.discordId = did;
+        if (session.user) session.user.id = did;
       }
       return session;
     },
@@ -42,7 +45,6 @@ const authConfig = {
 
   events: {
     async signIn({ profile, account }) {
-      // Аккуратно вытаскиваем значения из profile/account
       const p = profile as Record<string, unknown> | null | undefined;
 
       const discordId =
