@@ -1,9 +1,8 @@
+// src/auth.ts
 import NextAuth from "next-auth";
-import Discord, { type DiscordProfile } from "next-auth/providers/discord";
+import Discord from "next-auth/providers/discord";
 import type { JWT } from "next-auth/jwt";
-import type { Account, Session } from "next-auth";
-import { sql } from "@vercel/postgres";
-import { ensureTables } from "@/lib/db";
+import { upsertUser } from "@/lib/db";
 
 export const {
   handlers: { GET, POST },
@@ -18,51 +17,38 @@ export const {
     }),
   ],
   callbacks: {
-    async jwt({
-      token,
-      account,
-      profile,
-    }: { token: JWT; account?: Account | null; profile?: DiscordProfile | null }) {
-      if (account?.access_token) token.accessToken = account.access_token as any;
-      if (profile?.id) token.discordId = profile.id as any;
-      return token;
-    },
-    async session({ session, token }: { session: Session; token: JWT }) {
-      (session as any).accessToken = (token as any)?.accessToken;
-      (session as any).discordId = (token as any)?.discordId;
-      return session;
-    },
-  },
-  events: {
-    // ← вот это главное: сохраняем/обновляем пользователя в таблице users
-    async signIn({ account, profile }) {
+    async jwt({ token, account, profile }) {
+      // аккуратно добавляем дополнительные поля в токен без any
+      const t = token as unknown as Record<string, unknown>;
+      if (account?.access_token) {
+        t.accessToken = account.access_token;
+      }
+      // у Discord профиль имеет поле id
       const discordId =
-        (profile as any)?.id || account?.providerAccountId || null;
-      if (!discordId) return;
+        (profile as unknown as { id?: string } | null | undefined)?.id;
+      if (discordId) {
+        t.discordId = discordId;
+      }
+      return token as JWT;
+    },
 
-      const name =
-        (profile as any)?.global_name ??
-        (profile as any)?.username ??
-        null;
-      const email = (profile as any)?.email ?? null;
+    async session({ session, token }) {
+      const t = token as unknown as Record<string, unknown>;
+      const s = session as unknown as Record<string, unknown>;
 
-      // аватар Discord (если есть)
-      const avatar =
-        (profile as any)?.avatar
-          ? `https://cdn.discordapp.com/avatars/${discordId}/${(profile as any).avatar}.png`
-          : null;
+      s.accessToken = (t.accessToken as string | undefined) ?? undefined;
+      s.discordId = (t.discordId as string | undefined) ?? undefined;
 
-      await ensureTables();
+      // Обновляем/создаём запись пользователя в БД
+      const discordId = s.discordId as string | undefined;
+      if (discordId) {
+        const name = session.user?.name ?? null;
+        const avatar =
+          (session.user as { image?: string } | undefined)?.image ?? null;
+        await upsertUser(discordId, name, avatar);
+      }
 
-      await sql/*sql*/`
-        INSERT INTO users (discord_id, name, email, avatar_url)
-        VALUES (${discordId}, ${name}, ${email}, ${avatar})
-        ON CONFLICT (discord_id) DO UPDATE
-        SET name = EXCLUDED.name,
-            email = EXCLUDED.email,
-            avatar_url = EXCLUDED.avatar_url,
-            last_login_at = now();
-      `;
+      return session;
     },
   },
 });
