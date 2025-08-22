@@ -1,24 +1,20 @@
 // src/app/api/photo/list/route.ts
-export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
-type WeeklyPhoto = {
-  url: string;
-  author: string;
-  createdAt: string; // ISO
-};
-
-export const dynamic = "force-dynamic"; // чтобы не кэшировало на билде
+export const dynamic = "force-dynamic"; // только один раз!
+export const runtime = "nodejs";
 
 export async function GET() {
-  // TODO: здесь потом подключим БД/хранилище. Пока — стаб, чтобы сборка проходила.
-  const photos: WeeklyPhoto[] = [
-    {
-      url: "https://via.placeholder.com/800x500?text=Weekly+Photo",
-      author: "System",
-      createdAt: new Date().toISOString(),
-    },
-  ];
-
-  return NextResponse.json({ photos });
+  try {
+    const filePath = path.join(process.cwd(), "src", "data", "weekly.json");
+    const file = await readFile(filePath, "utf8");
+    const data = JSON.parse(file);
+    // ожидаем структуру { photos: [...] }
+    return NextResponse.json(data);
+  } catch {
+    // если файла нет — вернём пустой список
+    return NextResponse.json({ photos: [] });
+  }
 }
