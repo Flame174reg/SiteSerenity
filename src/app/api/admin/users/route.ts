@@ -1,21 +1,25 @@
+// src/app/api/admin/users/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getUsers, getAdmins, OWNER_ID } from "@/lib/adminStore";
+import { isSuperAdmin } from "@/lib/access";
+import { ensureTables } from "@/lib/db";
+import { sql } from "@vercel/postgres";
 
-type SessionLike = { discordId?: string };
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = (await auth()) as unknown as SessionLike | null;
-  if (!session?.discordId || session.discordId !== OWNER_ID) {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  const session = await auth();
+  const discordId = (session as any)?.discordId;
+  if (!discordId || !isSuperAdmin(discordId)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const [users, admins] = await Promise.all([getUsers(), getAdmins()]);
-  const rows = users.map((u) => ({
-    ...u,
-    isAdmin: admins.has(u.id),
-    isOwner: u.id === OWNER_ID,
-  }));
-
+  await ensureTables();
+  const { rows } = await sql/*sql*/`
+    SELECT discord_id, name, email, avatar_url, last_login_at
+    FROM users
+    ORDER BY last_login_at DESC
+    LIMIT 200
+  `;
   return NextResponse.json({ users: rows });
 }
