@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import AccountCard from "./AccountCard";
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
@@ -65,6 +66,11 @@ export default function Sidebar() {
           >
             ✕
           </button>
+          
+        </div>
+        {/* Личный кабинет / авторизация */}
+        <div className="p-3 border-b border-white/10">
+          <AccountCard />
         </div>
 
         <nav className="p-3 space-y-1 text-sm">
