@@ -18,7 +18,6 @@ jobs:
 
       - name: Ensure next-auth type augmentation
         run: |
-          set -euo pipefail
           mkdir -p src/types
           cat > src/types/next-auth.d.ts <<'EOF'
           import { DefaultSession } from "next-auth";
@@ -45,7 +44,6 @@ EOF
 
       - name: Ensure tsconfig include
         run: |
-          set -euo pipefail
           if [ -f tsconfig.json ]; then
             node - <<'NODE'
             const fs = require('fs');
@@ -61,7 +59,20 @@ NODE
             echo "tsconfig.json not found, skipping"
           fi
 
-      - name: Normalize src/auth.ts (optional hard replace)
+      - name: Replace session.discordId usage
         run: |
-          set -euo pipefail
-          if grep -q "@ts-expect-error" src/auth.ts || ! grep -q "async session({ s
+          git grep -l "session\.discordId" -- 'src/*' || true
+          git grep -l "session\.discordId" -- 'src/*' | xargs -r sed -i 's/session\.discordId/session.user?.id/g'
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore: autofix next-auth types and session.user.id'
+          title: 'Autofix: next-auth types and session.user.id'
+          branch: autofix/next-auth
+          delete-branch: true
+          body: |
+            Автофикс:
+            - добавлен src/types/next-auth.d.ts (JWT/Session augmentation)
+            - tsconfig.json включает "src/types/**/*.d.ts"
+            - заменены все session.discordId -> session.user?.id
