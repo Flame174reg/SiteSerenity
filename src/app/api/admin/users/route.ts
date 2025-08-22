@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await auth();
-  const me = session?.discordId; // без any
+  const me = session?.user?.id;
   if (!me) return NextResponse.json({ users: [] });
 
   await ensureTables();
