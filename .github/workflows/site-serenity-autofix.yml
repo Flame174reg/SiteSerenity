@@ -1,0 +1,180 @@
+name: SiteSerenity Autofix
+
+on:
+  workflow_dispatch: {} # запуск вручную из вкладки Actions
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1) Создаем/обновляем декларации типов next-auth
+      - name: Ensure next-auth type augmentation
+        run: |
+          mkdir -p src/types
+          cat > src/types/next-auth.d.ts <<'EOF'
+          import { DefaultSession } from "next-auth";
+
+          declare module "next-auth" {
+            interface Session {
+              accessToken?: string;
+              discordId?: string;
+              user: {
+                id?: string;
+              } & DefaultSession["user"];
+            }
+          }
+
+          declare module "next-auth/jwt" {
+            interface JWT {
+              accessToken?: string;
+              discordId?: string;
+            }
+          }
+
+          export {};
+          EOF
+
+      # 2) Гарантируем, что tsconfig включает src/types/**/*.d.ts
+      - name: Ensure tsconfig include
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'tsconfig.json';
+          const json = JSON.parse(fs.readFileSync(path, 'utf8'));
+          json.include = json.include || [];
+          if (!json.include.includes('src/types/**/*.d.ts')) {
+            json.include.push('src/types/**/*.d.ts');
+          }
+          fs.writeFileSync(path, JSON.stringify(json, null, 2) + '\n');
+          NODE
+
+      # 3) Обновляем src/auth.ts при необходимости (если остались @ts-expect-error)
+      - name: Normalize src/auth.ts
+        run: |
+          if grep -q "@ts-expect-error" src/auth.ts || ! grep -q "session({ session, token })" src/auth.ts; then
+            cat > src/auth.ts <<'EOF'
+            // src/auth.ts (normalized)
+            import NextAuth, { type NextAuthConfig } from "next-auth";
+            import Discord from "next-auth/providers/discord";
+            import { ensureTables } from "@/lib/db";
+            import { sql } from "@vercel/postgres";
+
+            const authConfig = {
+              secret: process.env.AUTH_SECRET,
+              providers: [
+                Discord({
+                  clientId: process.env.DISCORD_CLIENT_ID!,
+                  clientSecret: process.env.DISCORD_CLIENT_SECRET!,
+                  authorization: { params: { scope: "identify email" } },
+                }),
+              ],
+
+              callbacks: {
+                async jwt({ token, account, profile }) {
+                  if (account?.access_token) {
+                    token.accessToken = String(account.access_token);
+                  }
+
+                  const p = profile as Record<string, unknown> | null | undefined;
+                  const pid = p && typeof p.id === "string" ? p.id : undefined;
+                  if (pid) token.discordId = pid;
+
+                  return token;
+                },
+
+                async session({ session, token }) {
+                  session.accessToken = typeof token.accessToken === "string" ? token.accessToken : undefined;
+
+                  if (typeof token.discordId === "string") {
+                    session.discordId = token.discordId;
+                    if (session.user) session.user.id = token.discordId;
+                  }
+                  return session;
+                },
+              },
+
+              events: {
+                async signIn({ profile, account }) {
+                  const p = profile as Record<string, unknown> | null | undefined;
+
+                  const discordId =
+                    (p && typeof p.id === "string" ? p.id : undefined) ??
+                    (account && typeof account.providerAccountId === "string" ? account.providerAccountId : undefined);
+
+                  if (!discordId) return;
+
+                  const name =
+                    (p && typeof p.global_name === "string" ? p.global_name : undefined) ??
+                    (p && typeof p.username === "string" ? p.username : undefined) ??
+                    null;
+
+                  const email =
+                    (p && typeof p.email === "string" ? p.email : undefined) ?? null;
+
+                  const avatarHash =
+                    (p && typeof p.avatar === "string" ? p.avatar : undefined) ?? null;
+
+                  const avatar = avatarHash
+                    ? `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.png`
+                    : null;
+
+                  await ensureTables();
+                  await sql/*sql*/`
+                    INSERT INTO users (discord_id, name, email, avatar_url, last_login_at)
+                    VALUES (${discordId}, ${name}, ${email}, ${avatar}, NOW())
+                    ON CONFLICT (discord_id) DO UPDATE
+                    SET name = EXCLUDED.name,
+                        email = EXCLUDED.email,
+                        avatar_url = EXCLUDED.avatar_url,
+                        last_login_at = NOW();
+                  `;
+                },
+              },
+            } satisfies NextAuthConfig;
+
+            const { handlers, auth } = NextAuth(authConfig);
+            export { auth, handlers };
+            export const { GET, POST } = handlers;
+            EOF
+          else
+            echo "auth.ts looks fine, skipping hard replace"
+          fi
+
+      # 4) Заменяем все обращения к session.discordId на session.user?.id
+      - name: Replace session.discordId usage
+        run: |
+          if git grep -n "session\\.discordId" -- 'src/*' >/dev/null 2>&1; then
+            git grep -l "session\\.discordId" -- 'src/*' | xargs sed -i 's/session\.discordId/session.user?.id/g'
+          fi
+
+      # 5) Проверяем сборку (не валим job, если билд упадет из-за env)
+      - name: Try build (non-blocking)
+        run: |
+          npm ci || npm i
+          npm run -s build || true
+
+      # 6) Создаем PR с изменениями
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore: autofix next-auth types and session.user.id'
+          title: 'Autofix: next-auth types and session.user.id'
+          branch: autofix/next-auth
+          delete-branch: true
+          body: |
+            Автофикс:
+            - добавлен src/types/next-auth.d.ts (JWT/Session augmentation)
+            - tsconfig.json включает "src/types/**/*.d.ts"
+            - заменены все session.discordId -> session.user.id
+            - нормализован src/auth.ts (type-safe callbacks)
+            Варнинги про <img> оставлены как есть — они не блокируют сборку.
