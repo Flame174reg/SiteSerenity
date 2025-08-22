@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useEffect } from "react";
 import Link from "next/link";
+import { useSession, signIn, signOut } from "next-auth/react";
 
 function UserBadgeIcon() {
   return (
@@ -24,8 +25,14 @@ function UserBadgeIcon() {
 
 export default function AccountCard() {
   const { data: session, status } = useSession();
-
   const loading = status === "loading";
+
+  // ⬇️ Отмечаем вход пользователя (для списка в админке)
+  useEffect(() => {
+    if (status === "authenticated") {
+      fetch("/api/admin/seen", { method: "POST" }).catch(() => {});
+    }
+  }, [status]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/50 p-4">
@@ -33,11 +40,12 @@ export default function AccountCard() {
         <UserBadgeIcon />
         <div className="min-w-0">
           <div className="text-xs opacity-70">
-            {loading ? "Загрузка…" : session ? (
+            {loading ? (
+              "Загрузка…"
+            ) : session ? (
               <>
                 USER ID:{" "}
                 <span className="font-semibold">
-                  {/* покажем discordId если есть, иначе email/имя */}
                   {(session as any)?.discordId ??
                     session?.user?.email ??
                     session?.user?.name ??
