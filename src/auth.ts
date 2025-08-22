@@ -4,6 +4,15 @@ import Discord from "next-auth/providers/discord";
 import { ensureTables } from "@/lib/db";
 import { sql } from "@vercel/postgres";
 
+/** Узкий тайпгард для безопасного доступа к полям в unknown-объектах */
+function getString(obj: unknown, key: string): string | undefined {
+  if (obj && typeof obj === "object" && key in obj) {
+    const v = (obj as Record<string, unknown>)[key];
+    return typeof v === "string" ? v : undefined;
+  }
+  return undefined;
+}
+
 const authConfig = {
   secret: process.env.AUTH_SECRET,
   providers: [
@@ -16,26 +25,24 @@ const authConfig = {
 
   callbacks: {
     async jwt({ token, account, profile }) {
-      if (account?.access_token) {
-        token.accessToken = String(account.access_token);
-      }
+      // access_token -> JWT
+      const access = getString(account as unknown, "access_token");
+      if (access) token.accessToken = access;
 
-      const p = profile as Record<string, unknown> | null | undefined;
-      const pid = p && typeof p.id === "string" ? p.id : undefined;
+      // discord id -> JWT
+      const pid = getString(profile as unknown, "id");
       if (pid) token.discordId = pid;
 
       return token;
     },
 
     async session({ session, token }) {
-      // КРИТИЧЕСКАЯ ПРАВКА: нормализуем тип accessToken
-      session.accessToken =
-        typeof (token as any).accessToken === "string"
-          ? ((token as any).accessToken as string)
-          : undefined;
+      // безопасно читаем потенциально неописанные поля токена
+      const access = getString(token as unknown, "accessToken");
+      const did = getString(token as unknown, "discordId");
 
-      if (typeof (token as any).discordId === "string") {
-        const did = (token as any).discordId as string;
+      session.accessToken = access ?? undefined;
+      if (did) {
         session.discordId = did;
         if (session.user) session.user.id = did;
       }
@@ -45,35 +52,27 @@ const authConfig = {
 
   events: {
     async signIn({ profile, account }) {
-      const p = profile as Record<string, unknown> | null | undefined;
-
-      const discordId =
-        (p && typeof p.id === "string" ? p.id : undefined) ??
-        (account && typeof account.providerAccountId === "string"
-          ? account.providerAccountId
-          : undefined);
-
-      if (!discordId) return;
+      const pid =
+        getString(profile as unknown, "id") ??
+        getString(account as unknown, "providerAccountId");
+      if (!pid) return;
 
       const name =
-        (p && typeof p.global_name === "string" ? p.global_name : undefined) ??
-        (p && typeof p.username === "string" ? p.username : undefined) ??
+        getString(profile as unknown, "global_name") ??
+        getString(profile as unknown, "username") ??
         null;
 
-      const email =
-        (p && typeof p.email === "string" ? p.email : undefined) ?? null;
-
-      const avatarHash =
-        (p && typeof p.avatar === "string" ? p.avatar : undefined) ?? null;
+      const email = getString(profile as unknown, "email") ?? null;
+      const avatarHash = getString(profile as unknown, "avatar") ?? null;
 
       const avatar = avatarHash
-        ? `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.png`
+        ? `https://cdn.discordapp.com/avatars/${pid}/${avatarHash}.png`
         : null;
 
       await ensureTables();
       await sql/*sql*/`
         INSERT INTO users (discord_id, name, email, avatar_url, last_login_at)
-        VALUES (${discordId}, ${name}, ${email}, ${avatar}, NOW())
+        VALUES (${pid}, ${name}, ${email}, ${avatar}, NOW())
         ON CONFLICT (discord_id) DO UPDATE
         SET name = EXCLUDED.name,
             email = EXCLUDED.email,
