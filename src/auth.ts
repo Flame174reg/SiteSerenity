@@ -127,7 +127,7 @@ const authConfig = {
         ON CONFLICT (discord_id) DO UPDATE SET ${setUpdates};
       `;
 
-      await sql.unsafe(query);
+      await sql.query(query);
     },
   },
 } satisfies NextAuthConfig;
