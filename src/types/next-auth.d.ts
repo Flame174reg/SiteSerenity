@@ -17,5 +17,3 @@ declare module "next-auth/jwt" {
     discordId?: string;
   }
 }
-
-export {};
