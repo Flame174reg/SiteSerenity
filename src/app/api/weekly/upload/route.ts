@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 const OWNER_ID = "1195944713639960601";
 
 async function ensureTables() {
+  // создаём таблицы, если их нет
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
@@ -17,13 +18,23 @@ async function ensureTables() {
   `;
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS weekly_photos (
-      key TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      category TEXT NOT NULL,
+      url TEXT,
+      category TEXT,
       caption TEXT,
       uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+      uploaded_at TIMESTAMPTZ
     );
+  `;
+  // добавляем недостающие колонки (если ранее таблица была иной)
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
+  // уникальность ключа для UPSERT
+  await sql/*sql*/`
+    CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);
   `;
 }
 
@@ -63,12 +74,15 @@ export async function POST(req: Request) {
 
     const uploaded = await put(key, file, { access: "public", token });
 
-    // заносим карточку в БД (без подписи)
+    await ensureTables();
     await sql/*sql*/`
-      INSERT INTO weekly_photos (key, url, category, uploaded_by)
-      VALUES (${key}, ${uploaded.url}, ${category}, ${me})
+      INSERT INTO weekly_photos (key, url, category, caption, uploaded_by, uploaded_at)
+      VALUES (${key}, ${uploaded.url}, ${category}, NULL, ${me}, NOW())
       ON CONFLICT (key) DO UPDATE
-      SET url = EXCLUDED.url, category = EXCLUDED.category;
+      SET url = EXCLUDED.url,
+          category = EXCLUDED.category,
+          uploaded_by = EXCLUDED.uploaded_by,
+          uploaded_at = EXCLUDED.uploaded_at;
     `;
 
     return NextResponse.json({ ok: true, key, url: uploaded.url, size: file.size });
