@@ -8,7 +8,17 @@ export const dynamic = "force-dynamic";
 
 const OWNER_ID = "1195944713639960601";
 
+async function ensureUploadersTable() {
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS uploaders (
+      discord_id TEXT PRIMARY KEY,
+      role TEXT NOT NULL
+    );
+  `;
+}
+
 async function isAdmin(discordId: string): Promise<boolean> {
+  await ensureUploadersTable(); // гарантируем, что таблица есть
   const { rows } = await sql/*sql*/`
     SELECT 1 FROM uploaders
     WHERE discord_id = ${discordId} AND role = 'admin'
@@ -52,7 +62,7 @@ export async function POST(req: Request) {
       ok: true,
       key,
       url: uploaded.url,
-      size: file.size, // у результата put нет поля size — используем размер исходного файла
+      size: file.size, // размер берем из исходного файла
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
