@@ -1,7 +1,6 @@
 // src/app/weekly/page.tsx
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
-import Image from "next/image";
 import { headers } from "next/headers";
 import UploadClient from "./upload.client";
 import GalleryClient from "./gallery.client";
@@ -33,20 +32,41 @@ async function isAdmin(discordId: string | null | undefined) {
 }
 
 function isWeeklyItems(x: unknown): x is WeeklyItem[] {
-  return Array.isArray(x) && x.every((it) => it && typeof it === "object" && "url" in (it as any) && "key" in (it as any));
+  return (
+    Array.isArray(x) &&
+    x.every(
+      (it) =>
+        typeof it === "object" &&
+        it !== null &&
+        "url" in it &&
+        "key" in it
+    )
+  );
+}
+
+function hasItems(o: unknown): o is { items: unknown } {
+  return typeof o === "object" && o !== null && "items" in o;
+}
+function hasCategories(o: unknown): o is { categories: unknown } {
+  return typeof o === "object" && o !== null && "categories" in o;
 }
 
 async function fetchData(absBaseUrl: string, category?: string) {
-  // список элементов выбранной категории
   const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  const resItems = await fetch(`${absBaseUrl}/api/weekly/list${qs}`, { cache: "no-store" });
-  const dataItems = await resItems.json().catch(() => ({} as any));
-  const items: WeeklyItem[] = isWeeklyItems(dataItems.items) ? dataItems.items : [];
 
-  // категории (берем без фильтра)
+  const resItems = await fetch(`${absBaseUrl}/api/weekly/list${qs}`, { cache: "no-store" });
+  const di: unknown = await resItems.json().catch(() => ({}));
+
+  let items: WeeklyItem[] = [];
+  if (hasItems(di) && isWeeklyItems(di.items)) items = di.items;
+
   const resCats = await fetch(`${absBaseUrl}/api/weekly/list`, { cache: "no-store" });
-  const dataCats = await resCats.json().catch(() => ({} as any));
-  const categories: string[] = Array.isArray(dataCats.categories) ? dataCats.categories : [];
+  const dc: unknown = await resCats.json().catch(() => ({}));
+
+  let categories: string[] = [];
+  if (hasCategories(dc) && Array.isArray(dc.categories)) {
+    categories = (dc.categories as unknown[]).filter((x): x is string => typeof x === "string");
+  }
 
   return { items, categories };
 }
@@ -80,10 +100,11 @@ export default async function WeeklyPage({
           Вы вошли как: <span className="font-mono">{myId}</span>
         </div>
       ) : (
-        <div className="text-sm text-gray-300">Войдите через Discord, чтобы загружать изображения (если вы администратор).</div>
+        <div className="text-sm text-gray-300">
+          Войдите через Discord, чтобы загружать изображения (если вы администратор).
+        </div>
       )}
 
-      {/* Форма загрузки (только для админов/владельца) */}
       {admin && (
         <UploadClient
           defaultCategory={category || "general"}
