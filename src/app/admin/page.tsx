@@ -1,6 +1,7 @@
 // src/app/admin/page.tsx
 import { auth } from "@/auth";
 import AdminClient from "./ui/AdminClient";
+import UploadClient from "./upload.client";
 
 export default async function AdminPage() {
   const session = await auth();
