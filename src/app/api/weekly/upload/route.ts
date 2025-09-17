@@ -5,54 +5,26 @@ import { sql } from "@vercel/postgres";
 import { put } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const OWNER_ID = "1195944713639960601";
 
-// добавляет недостающие колонки и уникальный индекс на key
-async function ensureTables() {
+async function isAdmin(id: string) {
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
       role TEXT NOT NULL
     );
   `;
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS weekly_photos (
-      url TEXT,
-      category TEXT,
-      caption TEXT,
-      uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ
-    );
-  `;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
-  await sql/*sql*/`CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);`;
-}
-
-async function isAdmin(discordId: string): Promise<boolean> {
-  await ensureTables();
   const { rows } = await sql/*sql*/`
-    SELECT 1 FROM uploaders WHERE discord_id = ${discordId} AND role = 'admin' LIMIT 1;
+    SELECT 1 FROM uploaders WHERE discord_id = ${id} AND role='admin' LIMIT 1;
   `;
-  return rows.length > 0 || discordId === OWNER_ID;
+  return rows.length > 0 || id === OWNER_ID;
 }
 
-// запрещаем только "/", остальные юникод-символы и пробелы разрешаем
-function validateCategory(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed || trimmed.length > 64) return null;
-  if (trimmed.includes("/")) return null;
-  return trimmed;
-}
-
-// сегмент ключа хранить в Blob безопасно: кодируем (в UI показываем исходное имя)
-function toSafeSegment(raw: string) {
-  return encodeURIComponent(raw);
+function safeExt(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return ext.match(/^[a-z0-9]{1,5}$/) ? ext : "jpg";
 }
 
 export async function POST(req: Request) {
@@ -62,35 +34,57 @@ export async function POST(req: Request) {
     if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
     if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
-    const form = await req.formData();
-    const rawCategoryInput = String(form.get("category") ?? "Общая");
-    const categoryHuman = validateCategory(rawCategoryInput);
-    if (!categoryHuman) return NextResponse.json({ ok: false, reason: "bad_category" }, { status: 400 });
-
-    const file = form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ ok: false, reason: "no_file" }, { status: 400 });
-
-    const safeCat = toSafeSegment(categoryHuman);
-    const safeName = file.name.replace(/[^\w.\-]+/g, "_"); // само имя файла слегка чистим
-    const key = `weekly/${safeCat}/${Date.now()}_${safeName}`;
-
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
 
-    const uploaded = await put(key, file, { access: "public", token });
+    const form = await req.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) {
+      return NextResponse.json({ ok: false, reason: "no_file" }, { status: 400 });
+    }
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ ok: false, reason: "not_image" }, { status: 400 });
+    }
 
-    await ensureTables();
-    await sql/*sql*/`
-      INSERT INTO weekly_photos (key, url, category, caption, uploaded_by, uploaded_at)
-      VALUES (${key}, ${uploaded.url}, ${categoryHuman}, NULL, ${me}, NOW())
-      ON CONFLICT (key) DO UPDATE
-      SET url = EXCLUDED.url,
-          category = EXCLUDED.category,
-          uploaded_by = EXCLUDED.uploaded_by,
-          uploaded_at = EXCLUDED.uploaded_at;
-    `;
+    // 1) Папка: выбираем ПРИНУДИТЕЛЬНО из URL (forcedCategorySafe), если она передана
+    const forcedSafe = form.get("forcedCategorySafe");
+    let safeFolder: string | null = null;
+    if (typeof forcedSafe === "string" && forcedSafe && !forcedSafe.includes("/")) {
+      // это уже safe-сегмент из URL (/weekly/<safe>)
+      safeFolder = forcedSafe;
+    } else {
+      // иначе берём «человеческое» название категории, кодируем сами
+      const human = String((form.get("category") ?? "")).trim() || "general";
+      safeFolder = encodeURIComponent(human);
+    }
 
-    return NextResponse.json({ ok: true, key, url: uploaded.url, category: categoryHuman, size: file.size });
+    // 2) Ключ файла в выбранной папке
+    const ts = Date.now();
+    const rnd = Math.random().toString(36).slice(2, 8);
+    const ext = safeExt(file.name);
+    const key = `weekly/${safeFolder}/${ts}-${rnd}.${ext}`;
+
+    // 3) Заливаем файл
+    const uploaded = await put(key, file, {
+      access: "public",
+      token,
+      contentType: file.type || `image/${ext}`,
+    });
+
+    // 4) Гарантируем наличие .keep (не навредит, можем перезаписать)
+    const keep = new Blob(["keep"], { type: "text/plain; charset=utf-8" });
+    await put(`weekly/${safeFolder}/.keep`, keep, {
+      access: "public",
+      token,
+      contentType: keep.type,
+    }).catch(() => { /* игнор, если что-то не так */ });
+
+    return NextResponse.json({
+      ok: true,
+      key,
+      url: uploaded.url,
+      categorySafe: safeFolder,
+    });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
