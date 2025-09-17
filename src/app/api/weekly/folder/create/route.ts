@@ -28,21 +28,33 @@ export async function POST(req: Request) {
     if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
     const bodyRaw: unknown = await req.json().catch(() => null);
-    if (typeof bodyRaw !== "object" || bodyRaw === null)
+    if (typeof bodyRaw !== "object" || bodyRaw === null) {
       return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
+    }
 
     const name = String((bodyRaw as { name?: unknown }).name ?? "").trim();
-    if (!name || name.includes("/") || name.length > 64)
+    if (!name || name.includes("/") || name.length > 64) {
       return NextResponse.json({ ok: false, reason: "bad_name" }, { status: 400 });
+    }
 
     const safe = encodeURIComponent(name);
     const key = `weekly/${safe}/.keep`;
 
     const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token) return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
+    if (!token) {
+      return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
+    }
 
-    // создаём маркер (0 байт)
-    await put(key, new Blob([""]), { access: "public", token });
+    // ⚠️ Vercel Blob 0.25+: задаём тело и contentLength явно
+    const content = "keep";
+    const bytes = new TextEncoder().encode(content);
+
+    await put(key, bytes, {
+      access: "public",
+      token,
+      contentType: "text/plain; charset=utf-8",
+      contentLength: bytes.length,
+    });
 
     return NextResponse.json({ ok: true, name, safe });
   } catch (e) {
