@@ -1,14 +1,18 @@
 // src/app/weekly/page.tsx
 import { auth } from "@/auth";
+import { sql } from "@vercel/postgres";
 import Image from "next/image";
 import { headers } from "next/headers";
+import UploadClient from "./upload.client";
+import GalleryClient from "./gallery.client";
 
 export const dynamic = "force-dynamic";
 
-// ===== Types =====
 type WeeklyItem = {
   url: string;
   key: string;
+  category: string;
+  caption?: string | null;
   uploadedAt?: string;
   size?: number;
 };
@@ -17,37 +21,41 @@ type RawSearchParams =
   | Record<string, string | string[] | undefined>
   | undefined;
 
-function isWeeklyItemArray(x: unknown): x is WeeklyItem[] {
-  return (
-    Array.isArray(x) &&
-    x.every(
-      (it) =>
-        it &&
-        typeof it === "object" &&
-        typeof (it as Record<string, unknown>).url === "string" &&
-        typeof (it as Record<string, unknown>).key === "string"
-    )
-  );
+const OWNER_ID = "1195944713639960601";
+
+async function isAdmin(discordId: string | null | undefined) {
+  if (!discordId) return false;
+  if (discordId === OWNER_ID) return true;
+  const { rows } = await sql/*sql*/`
+    SELECT 1 FROM uploaders WHERE discord_id = ${discordId} AND role = 'admin' LIMIT 1;
+  `;
+  return rows.length > 0;
 }
 
-// ===== Data =====
-async function fetchItems(absBaseUrl: string, category?: string): Promise<WeeklyItem[]> {
+function isWeeklyItems(x: unknown): x is WeeklyItem[] {
+  return Array.isArray(x) && x.every((it) => it && typeof it === "object" && "url" in (it as any) && "key" in (it as any));
+}
+
+async function fetchData(absBaseUrl: string, category?: string) {
+  // список элементов выбранной категории
   const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  const endpoint = `${absBaseUrl}/api/weekly/list${qs}`;
-  const res = await fetch(endpoint, { cache: "no-store" });
-  if (!res.ok) return [];
-  const data: unknown = await res.json().catch(() => ({}));
-  const items = (data as { items?: unknown }).items;
-  return isWeeklyItemArray(items) ? items : [];
+  const resItems = await fetch(`${absBaseUrl}/api/weekly/list${qs}`, { cache: "no-store" });
+  const dataItems = await resItems.json().catch(() => ({} as any));
+  const items: WeeklyItem[] = isWeeklyItems(dataItems.items) ? dataItems.items : [];
+
+  // категории (берем без фильтра)
+  const resCats = await fetch(`${absBaseUrl}/api/weekly/list`, { cache: "no-store" });
+  const dataCats = await resCats.json().catch(() => ({} as any));
+  const categories: string[] = Array.isArray(dataCats.categories) ? dataCats.categories : [];
+
+  return { items, categories };
 }
 
-// ===== Page (Next 15: searchParams может быть Promise) =====
 export default async function WeeklyPage({
   searchParams,
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  // Абсолютный base URL из заголовков
   const hdrs = await headers();
   const proto = hdrs.get("x-forwarded-proto") ?? "https";
   const host = hdrs.get("host") ?? "localhost:3000";
@@ -59,59 +67,41 @@ export default async function WeeklyPage({
 
   const session = await auth();
   const myId = session?.user?.id ?? null;
+  const admin = await isAdmin(myId);
 
-  const items = await fetchItems(absBaseUrl, category);
+  const { items, categories } = await fetchData(absBaseUrl, category);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-semibold">
-        Weekly gallery {category ? `— ${category}` : ""}
-      </h1>
+    <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      <h1 className="text-3xl font-bold">Недельный актив</h1>
 
       {myId ? (
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-gray-300">
           Вы вошли как: <span className="font-mono">{myId}</span>
         </div>
       ) : (
-        <div className="text-sm text-gray-500">
-          Войдите через Discord, чтобы загружать изображения (если вы администратор).
-        </div>
+        <div className="text-sm text-gray-300">Войдите через Discord, чтобы загружать изображения (если вы администратор).</div>
       )}
 
-      {/* Клиентская форма загрузки (поддерживает вставку из буфера и файлы с ПК) */}
-      <UploadClient defaultCategory={category} />
+      {/* Форма загрузки (только для админов/владельца) */}
+      {admin && (
+        <UploadClient
+          defaultCategory={category || "general"}
+          categories={categories}
+        />
+      )}
 
-      <div className="border-t pt-4">
-        <div className="mb-3 text-sm">
-          Категория (query): <code>?category=&lt;name&gt;</code>. Если не указана — показываем все под
-          <code> weekly/</code>.
+      <div className="border-t border-white/10 pt-4">
+        <div className="mb-3 text-sm text-white/80">
+          Тут Вы можете увидеть свой актив/явку за неделю.
         </div>
 
         {items.length === 0 ? (
-          <div className="text-gray-500">Здесь пока пусто.</div>
+          <div className="text-gray-400">Здесь пока пусто.</div>
         ) : (
-          <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {items.map((it) => (
-              <li key={it.key} className="group relative border rounded-lg overflow-hidden">
-                <a href={it.url} target="_blank" rel="noreferrer">
-                  <Image
-                    src={it.url}
-                    alt={it.key}
-                    width={600}
-                    height={400}
-                    className="object-cover w-full h-48"
-                    unoptimized
-                  />
-                </a>
-                <div className="p-2 text-xs text-gray-600 break-all">{it.key}</div>
-              </li>
-            ))}
-          </ul>
+          <GalleryClient items={items} isAdmin={admin} />
         )}
       </div>
     </div>
   );
 }
-
-// Отдельный импорт клиентского компонента
-import UploadClient from "./upload.client";
