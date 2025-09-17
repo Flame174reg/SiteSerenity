@@ -28,10 +28,11 @@ export default function WeeklyFolderClient({
   const [data, setData] = useState<WeeklyListResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const retriesLeft = useRef(5); // ретраи на случай, если листинг ещё не «увидел» новый файл
+  const [canManage, setCanManage] = useState(false);
+  const retriesLeft = useRef(5);
 
   const queryUrl = useMemo(() => {
-    const ts = Date.now(); // анти-кеш
+    const ts = Date.now();
     const sp = new URLSearchParams({ safe: categorySafe, t: String(ts) });
     return `/api/weekly/list?${sp.toString()}`;
   }, [categorySafe]);
@@ -44,7 +45,6 @@ export default function WeeklyFolderClient({
       setData(j);
       setLoading(false);
 
-      // Если всё ок, но пусто — попробуем ещё пару раз (eventual consistency у Blob)
       if (j.ok && j.items.length === 0 && retriesLeft.current > 0) {
         retriesLeft.current -= 1;
         setLoading(true);
@@ -60,8 +60,43 @@ export default function WeeklyFolderClient({
     retriesLeft.current = 5;
     setLoading(true);
     loadOnce();
+    (async () => {
+      try {
+        const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
+        const j = await r.json();
+        setCanManage(Boolean(j?.canUpload ?? j?.ok));
+      } catch {
+        setCanManage(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categorySafe]);
+
+  async function onDelete(key: string) {
+    if (!canManage) return;
+    if (!confirm("Удалить изображение безвозвратно?")) return;
+    try {
+      const r = await fetch("/api/weekly/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        setData((prev) => {
+          if (!prev || !("ok" in prev) || !prev.ok) return prev;
+          return {
+            ...prev,
+            items: prev.items.filter((it) => it.key !== key),
+          };
+        });
+      } else {
+        alert(`Не удалось удалить: ${j?.error ?? j?.reason ?? r.statusText}`);
+      }
+    } catch (e) {
+      alert(String(e));
+    }
+  }
 
   const items = (data && "ok" in data && data.ok) ? data.items : [];
   const categories = (data && data.categories) || [];
@@ -80,23 +115,18 @@ export default function WeeklyFolderClient({
         <span className="font-medium">{categoryHuman}</span>.
       </p>
 
-      {/* Жёстко грузим в текущую папку */}
       <UploadClient
         defaultCategory={categoryHuman}
         categories={[categoryHuman, ...categories.filter((c) => c !== categoryHuman)]}
         forcedCategorySafe={categorySafe}
       />
 
-      {/* Состояния */}
       {loading && <div className="text-white/70">Загружаем…</div>}
-      {!loading && err && (
-        <div className="text-red-400">Ошибка загрузки списка: {err}</div>
-      )}
+      {!loading && err && <div className="text-red-400">Ошибка загрузки списка: {err}</div>}
       {!loading && !err && data && "ok" in data && !data.ok && (
         <div className="text-red-400">Ошибка загрузки списка: {data.error}</div>
       )}
 
-      {/* Грид картинок */}
       {!loading && !err && data && "ok" in data && data.ok && (
         items.length > 0 ? (
           <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -118,6 +148,17 @@ export default function WeeklyFolderClient({
                     <p className="text-white text-sm drop-shadow">{it.caption}</p>
                   </div>
                 ) : null}
+
+                {canManage && (
+                  <button
+                    onClick={() => onDelete(it.key)}
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition
+                               rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
+                    title="Удалить изображение"
+                  >
+                    Удалить
+                  </button>
+                )}
               </li>
             ))}
           </ul>
