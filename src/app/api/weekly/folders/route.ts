@@ -5,35 +5,39 @@ import { list } from "@vercel/blob";
 export const dynamic = "force-dynamic";
 
 type Folder = {
-  name: string;        // «человеческое» имя (декодированное)
-  safe: string;        // зашифрованный сегмент (encodeURIComponent(name))
-  count: number;       // число изображений (без скрытых .files)
-  coverUrl: string | null; // url последнего изображения
+  name: string;          // человеко-читаемое имя (decodeURIComponent)
+  safe: string;          // безопасный сегмент (encodeURIComponent(name))
+  count: number;         // количество видимых картинок
+  coverUrl: string | null;
   updatedAt?: string | null;
 };
 
 export async function GET() {
   try {
-    // читаем всё, что лежит под weekly/
     const { blobs } = await list({ prefix: "weekly/", limit: 1000 });
+    type BlobItem = typeof blobs[number];
 
-    // группируем по 2-му сегменту
-    const map = new Map<string, { name: string; items: typeof blobs }>();
+    // группируем по префиксу weekly/<safe>/...
+    const map = new Map<string, { name: string; items: BlobItem[] }>();
+
     for (const b of blobs) {
       const parts = b.pathname.split("/");
       if (parts.length < 2) continue;
-      const safe = parts[1]; // зашифрованное имя папки
+      const safe = parts[1];
       const name = decodeURIComponent(safe);
-      if (!map.has(safe)) map.set(safe, { name, items: [] as any });
-      map.get(safe)!.items.push(b);
+
+      const bucket = map.get(safe);
+      if (bucket) bucket.items.push(b);
+      else map.set(safe, { name, items: [b] });
     }
 
     const folders: Folder[] = [];
 
     for (const [safe, data] of map) {
-      // исключаем скрытые файлы из подсчёта (".keep", ".thumb" и т.п.)
-      const visible = data.items.filter((b) => !b.pathname.split("/").pop()!.startsWith("."));
-      // обложка — самый «свежий» видимый
+      // скрытые файлы (.keep и т.п.) не считаем
+      const visible = data.items.filter((it) => !it.pathname.split("/").pop()!.startsWith("."));
+
+      // обложка — последний загруженный
       const latest = visible
         .slice()
         .sort((a, b) => {
@@ -51,9 +55,7 @@ export async function GET() {
       });
     }
 
-    // сортируем по обновлению
     folders.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-
     return NextResponse.json({ ok: true, folders });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e), folders: [] }, { status: 200 });
