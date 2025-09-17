@@ -17,8 +17,25 @@ type FoldersResp =
   | { ok: true; folders: Folder[] }
   | { ok: false; folders: Folder[]; error: string };
 
+type CanUploadResp = {
+  ok?: boolean;
+  canUpload?: boolean;
+};
+
+type CreateFolderResp = {
+  ok: boolean;
+  safe?: string;
+  error?: string;
+};
+
+type DeleteFolderResp = {
+  ok: boolean;
+  error?: string;
+  reason?: string;
+};
+
 // Безопасный парсер тела ответа (не падает на пустом/не-JSON)
-async function readJsonSafe<T = any>(r: Response): Promise<{ json: T | null; raw: string }> {
+async function readJsonSafe<T>(r: Response): Promise<{ json: T | null; raw: string }> {
   const raw = await r.text();
   if (!raw) return { json: null, raw: "" };
   try {
@@ -26,6 +43,15 @@ async function readJsonSafe<T = any>(r: Response): Promise<{ json: T | null; raw
   } catch {
     return { json: null, raw };
   }
+}
+
+// Вытянуть строковое поле по ключу из unknown-объекта
+function extractString(obj: unknown, key: string): string | null {
+  if (obj && typeof obj === "object") {
+    const v = (obj as Record<string, unknown>)[key];
+    if (typeof v === "string") return v;
+  }
+  return null;
 }
 
 export default function WeeklyRootClient() {
@@ -45,13 +71,14 @@ export default function WeeklyRootClient() {
       const { json, raw } = await readJsonSafe<FoldersResp>(r);
 
       if (!r.ok) {
-        setErr((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
+        setErr(msg);
         setLoading(false);
         return;
       }
 
       if (json && "folders" in json) {
-        setData(json);
+        setData(json as FoldersResp);
       } else {
         setData({ ok: false, folders: [], error: "Пустой ответ от /api/weekly/folders" });
         console.warn("folders: non-JSON/empty response:", raw);
@@ -69,7 +96,7 @@ export default function WeeklyRootClient() {
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-        const { json } = await readJsonSafe<any>(r);
+        const { json } = await readJsonSafe<CanUploadResp>(r);
         setCanManage(Boolean(json?.canUpload ?? json?.ok));
       } catch {
         setCanManage(false);
@@ -87,17 +114,17 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      const { json, raw } = await readJsonSafe<any>(r);
+      const { json, raw } = await readJsonSafe<CreateFolderResp>(r);
 
       if (!r.ok) {
-        const msg = ((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
         alert(msg);
         return;
       }
       if (json?.ok && json?.safe) {
         window.location.href = `/weekly/${json.safe}`;
       } else {
-        const msg = (((json as any)?.error) ?? raw) || "пустой ответ";
+        const msg = extractString(json, "error") ?? (raw || "пустой ответ");
         alert(`Не удалось создать папку: ${msg}`);
       }
     } catch (e) {
@@ -114,10 +141,10 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ safe }),
       });
-      const { json, raw } = await readJsonSafe<any>(r);
+      const { json, raw } = await readJsonSafe<DeleteFolderResp>(r);
 
       if (!r.ok) {
-        const msg = ((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
         alert(msg);
         return;
       }
@@ -132,7 +159,7 @@ export default function WeeklyRootClient() {
         // и перезагружаем с сервера
         loadOnce();
       } else {
-        const msg = (((json as any)?.error) ?? raw) || "пустой ответ";
+        const msg = extractString(json, "error") ?? (raw || "пустой ответ");
         alert(`Не удалось удалить папку: ${msg}`);
       }
     } catch (e) {
@@ -162,8 +189,8 @@ export default function WeeklyRootClient() {
       </div>
 
       <p className="text-sm text-white/70">
-        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую. Также можно
-        загрузить фото сразу, указав название новой папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую.
+        Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
       {/* Быстрая загрузка в новую/существующую папку */}
