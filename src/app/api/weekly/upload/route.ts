@@ -46,38 +46,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "not_image" }, { status: 400 });
     }
 
-    // 1) Папка: выбираем ПРИНУДИТЕЛЬНО из URL (forcedCategorySafe), если она передана
+    // 1) Папка: строго из URL (forcedCategorySafe), иначе — из текста категории
     const forcedSafe = form.get("forcedCategorySafe");
-    let safeFolder: string | null = null;
+    let safeFolder: string;
     if (typeof forcedSafe === "string" && forcedSafe && !forcedSafe.includes("/")) {
-      // это уже safe-сегмент из URL (/weekly/<safe>)
-      safeFolder = forcedSafe;
+      safeFolder = forcedSafe; // уже safe из маршрута /weekly/<safe>
     } else {
-      // иначе берём «человеческое» название категории, кодируем сами
       const human = String((form.get("category") ?? "")).trim() || "general";
       safeFolder = encodeURIComponent(human);
     }
 
-    // 2) Ключ файла в выбранной папке
+    // 2) Ключ файла
     const ts = Date.now();
     const rnd = Math.random().toString(36).slice(2, 8);
     const ext = safeExt(file.name);
     const key = `weekly/${safeFolder}/${ts}-${rnd}.${ext}`;
 
-    // 3) Заливаем файл
+    // 3) Загрузка изображения
     const uploaded = await put(key, file, {
       access: "public",
       token,
       contentType: file.type || `image/${ext}`,
+      // addRandomSuffix: false по умолчанию. Ключ уже уникален (ts+rnd).
     });
 
-    // 4) Гарантируем наличие .keep (не навредит, можем перезаписать)
+    // 4) Гарантируем .keep — и разрешаем перезапись, чтобы не падать
     const keep = new Blob(["keep"], { type: "text/plain; charset=utf-8" });
     await put(`weekly/${safeFolder}/.keep`, keep, {
       access: "public",
       token,
       contentType: keep.type,
-    }).catch(() => { /* игнор, если что-то не так */ });
+      allowOverwrite: true, // <-- важное изменение
+    }).catch(() => { /* ignore */ });
 
     return NextResponse.json({
       ok: true,
