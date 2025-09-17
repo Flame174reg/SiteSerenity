@@ -1,5 +1,6 @@
 // src/app/weekly/[category]/page.tsx
 import Link from "next/link";
+import type { PageProps } from "next";
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 import UploadClient from "../upload.client";
@@ -8,18 +9,15 @@ import GalleryClient from "../gallery.client";
 export const dynamic = "force-dynamic";
 const OWNER_ID = "1195944713639960601";
 
-type ListResp = {
-  ok: boolean;
-  items: {
-    url: string;
-    key: string;
-    category: string;
-    caption?: string | null;
-    uploadedAt?: string;
-    size?: number;
-  }[];
-  categories: string[];
+type Item = {
+  url: string;
+  key: string;
+  category: string;
+  caption?: string | null;
+  uploadedAt?: string;
+  size?: number;
 };
+type ListResp = { ok: boolean; items: Item[]; categories: string[] };
 
 async function getIsAdmin(): Promise<boolean> {
   try {
@@ -33,7 +31,7 @@ async function getIsAdmin(): Promise<boolean> {
       );
     `;
     const { rows } = await sql/*sql*/`
-      SELECT 1 FROM uploaders WHERE discord_id=${me} AND role='admin' LIMIT 1;
+      SELECT 1 FROM uploaders WHERE discord_id = ${me} AND role = 'admin' LIMIT 1;
     `;
     return rows.length > 0 || me === OWNER_ID;
   } catch {
@@ -43,19 +41,29 @@ async function getIsAdmin(): Promise<boolean> {
 
 async function getCategoryData(categorySafe: string): Promise<ListResp> {
   const name = decodeURIComponent(categorySafe);
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
   const res = await fetch(
-    `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/weekly/list?category=${encodeURIComponent(name)}`,
+    `${base}/api/weekly/list?category=${encodeURIComponent(name)}`,
     { cache: "no-store" }
   ).catch(() => null);
   const json = (await res?.json().catch(() => null)) as ListResp | null;
   return json ?? { ok: false, items: [], categories: [] };
 }
 
-export default async function WeeklyCategoryPage({ params }: { params: { category: string } }) {
-  const categorySafe = params.category;
+export default async function WeeklyCategoryPage(
+  { params }: PageProps<{ category: string }>
+) {
+  // В Next 15 params — Promise
+  const { category } = await params;
+  const categorySafe = category;
   const categoryHuman = decodeURIComponent(categorySafe);
-  const isAdmin = await getIsAdmin();
-  const data = await getCategoryData(categorySafe);
+
+  const [isAdmin, data] = await Promise.all([
+    getIsAdmin(),
+    getCategoryData(categorySafe),
+  ]);
 
   return (
     <main className="px-6 py-8">
@@ -78,7 +86,10 @@ export default async function WeeklyCategoryPage({ params }: { params: { categor
           </div>
         </div>
 
-        <UploadClient defaultCategory={categoryHuman} categories={[categoryHuman, ...(data.categories ?? [])]} />
+        <UploadClient
+          defaultCategory={categoryHuman}
+          categories={[categoryHuman, ...(data.categories ?? [])]}
+        />
 
         <p className="text-white/70 text-sm">
           Тут вы можете увидеть свой актив/явку за неделю.
