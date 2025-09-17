@@ -17,6 +17,17 @@ type FoldersResp =
   | { ok: true; folders: Folder[] }
   | { ok: false; folders: Folder[]; error: string };
 
+// --- безопасный парсер: не падает, если тела нет или оно не JSON
+async function readJsonSafe<T = any>(r: Response): Promise<{ json: T | null; raw: string }> {
+  const raw = await r.text(); // читаем тело ОДИН раз
+  if (!raw) return { json: null, raw: "" };
+  try {
+    return { json: JSON.parse(raw) as T, raw };
+  } catch {
+    return { json: null, raw };
+  }
+}
+
 export default function WeeklyRootClient() {
   const [data, setData] = useState<FoldersResp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,8 +42,21 @@ export default function WeeklyRootClient() {
       setErr(null);
       setLoading(true);
       const r = await fetch(url, { cache: "no-store" });
-      const j: FoldersResp = await r.json();
-      setData(j);
+      const { json, raw } = await readJsonSafe<FoldersResp>(r);
+
+      if (!r.ok) {
+        setErr((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        setLoading(false);
+        return;
+      }
+
+      if (json && "folders" in json) {
+        setData(json);
+      } else {
+        // тело пустое/не JSON — не валим приложение, а показываем диагностику
+        setData({ ok: false, folders: [], error: "Пустой ответ от /api/weekly/folders" });
+        console.warn("folders: non-JSON/empty response:", raw);
+      }
       setLoading(false);
     } catch (e) {
       setErr(String(e));
@@ -46,8 +70,8 @@ export default function WeeklyRootClient() {
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-        const j = await r.json();
-        setCanManage(Boolean(j?.canUpload ?? j?.ok));
+        const { json } = await readJsonSafe<any>(r);
+        setCanManage(Boolean(json?.canUpload ?? json?.ok));
       } catch {
         setCanManage(false);
       }
@@ -56,19 +80,27 @@ export default function WeeklyRootClient() {
   }, []);
 
   async function onCreateFolder() {
-    const name = window.prompt("Название папки (например: Апрель 2025):")?.trim();
+    const name = window
+      .prompt("Название папки (например: Апрель 2025):")
+      ?.trim();
     if (!name) return;
+
     try {
       const r = await fetch("/api/weekly/folder/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      const j = await r.json();
-      if (j?.ok && j.safe) {
-        window.location.href = `/weekly/${j.safe}`;
+      const { json, raw } = await readJsonSafe<any>(r);
+
+      if (!r.ok) {
+        alert((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        return;
+      }
+      if (json?.ok && json?.safe) {
+        window.location.href = `/weekly/${json.safe}`;
       } else {
-        alert(`Не удалось создать папку: ${j?.error ?? r.statusText}`);
+        alert(`Не удалось создать папку: ${(json as any)?.error ?? raw || "пустой ответ"}`);
       }
     } catch (e) {
       alert(String(e));
@@ -77,32 +109,45 @@ export default function WeeklyRootClient() {
 
   async function onDeleteFolder(safe: string) {
     if (!canManage) return;
-    if (!confirm("Удалить папку целиком? Все изображения и подписи будут удалены безвозвратно.")) return;
+    if (
+      !confirm(
+        "Удалить папку целиком? Все изображения и подписи будут удалены безвозвратно."
+      )
+    )
+      return;
+
     try {
       const r = await fetch("/api/weekly/folder/delete", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ safe }),
       });
-      const j = await r.json();
-      if (j?.ok) {
+      const { json, raw } = await readJsonSafe<any>(r);
+
+      if (!r.ok) {
+        alert((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        return;
+      }
+
+      if (json?.ok) {
         // оптимистично убираем папку из списка
-        setData(prev =>
+        setData((prev) =>
           prev && "folders" in prev
-            ? { ok: true, folders: prev.folders.filter(f => f.safe !== safe) }
+            ? { ok: true, folders: prev.folders.filter((f) => f.safe !== safe) }
             : prev
         );
-        // и на всякий — перезагружаем список
+        // и на всякий перезагружаем
         loadOnce();
       } else {
-        alert(`Не удалось удалить папку: ${j?.error ?? j?.reason ?? r.statusText}`);
+        alert(`Не удалось удалить папку: ${(json as any)?.error ?? raw || "пустой ответ"}`);
       }
     } catch (e) {
       alert(String(e));
     }
   }
 
-  const folders: Folder[] = (data && "folders" in data && data.folders) || [];
+  const folders: Folder[] =
+    (data && "folders" in data && data.folders) || [];
 
   return (
     <div className="space-y-4">
@@ -117,15 +162,19 @@ export default function WeeklyRootClient() {
               + Создать папку
             </button>
           )}
-          <Link href="/weekly?all=1" className="text-sm underline text-white/80 hover:text-white">
+          <Link
+            href="/weekly?all=1"
+            className="text-sm underline text-white/80 hover:text-white"
+          >
             Показать все фото
           </Link>
         </div>
       </div>
 
       <p className="text-sm text-white/70">
-        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую.
-        Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или
+        создайте новую. Также можно загрузить фото сразу, указав название новой
+        папки — она будет создана автоматически.
       </p>
 
       {/* Блок "быстрой" загрузки в новую/существующую папку */}
@@ -135,13 +184,18 @@ export default function WeeklyRootClient() {
       {loading && <div className="text-white/70">Загружаем папки…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
       {!loading && !err && folders.length === 0 && (
-        <div className="text-white/70">Пока нет папок. Создайте первую — например, «Апрель 2025».</div>
+        <div className="text-white/70">
+          Пока нет папок. Создайте первую — например, «Апрель 2025».
+        </div>
       )}
 
       {!loading && !err && folders.length > 0 && (
         <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {folders.map((f) => (
-            <li key={f.safe} className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5">
+            <li
+              key={f.safe}
+              className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5"
+            >
               <Link href={`/weekly/${f.safe}`} className="block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
