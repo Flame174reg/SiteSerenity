@@ -1,7 +1,8 @@
 // src/app/admin/page.tsx
 import { auth } from "@/auth";
 import AdminClient from "./ui/AdminClient";
-import UploadClient from "./upload.client";
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   const session = await auth();
@@ -22,7 +23,7 @@ export default async function AdminPage() {
     return (
       <main className="px-6 py-10">
         <div className="mx-auto max-w-3xl">
-          <p className="opacity-70">Доступ только для владельца.</p>
+          <p className="opacity-70">Куда лезешь? Эта кнопка только для Blake Serenity. Он тут царь и Бог ващет.</p>
         </div>
       </main>
     );
@@ -32,7 +33,9 @@ export default async function AdminPage() {
     <main className="px-6 py-10">
       <div className="mx-auto max-w-3xl space-y-4">
         <h1 className="text-2xl font-bold">Администрирование</h1>
-        <p className="opacity-70 text-sm">Выбирайте, кому разрешены загрузки фото (роль «Админ»).</p>
+        <p className="opacity-70 text-sm">
+          Выбирайте, кому разрешены загрузки фото (роль «Админ»).
+        </p>
         <AdminClient />
       </div>
     </main>
