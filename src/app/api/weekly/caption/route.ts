@@ -16,13 +16,21 @@ async function ensureTables() {
   `;
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS weekly_photos (
-      key TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      category TEXT NOT NULL,
+      url TEXT,
+      category TEXT,
       caption TEXT,
       uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+      uploaded_at TIMESTAMPTZ
     );
+  `;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
+  await sql/*sql*/`
+    CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);
   `;
 }
 
@@ -56,15 +64,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "bad_key" }, { status: 400 });
     }
 
-    // категория из ключа
     const parts = key.split("/");
     const category = parts.length > 2 ? parts[1] : "unknown";
 
+    await ensureTables();
     await sql/*sql*/`
       INSERT INTO weekly_photos (key, url, category, caption)
       VALUES (${key}, '', ${category}, ${caption ?? null})
       ON CONFLICT (key) DO UPDATE
-      SET caption = EXCLUDED.caption, category = EXCLUDED.category;
+      SET caption = EXCLUDED.caption,
+          category = EXCLUDED.category;
     `;
 
     return NextResponse.json({ ok: true });
