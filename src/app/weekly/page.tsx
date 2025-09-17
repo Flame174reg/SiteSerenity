@@ -1,6 +1,7 @@
 // src/app/weekly/page.tsx
 import { auth } from "@/auth";
 import Image from "next/image";
+import UploadClient from "./upload.client";
 
 // ===== Types =====
 type WeeklyItem = {
@@ -39,7 +40,7 @@ async function fetchItems(category?: string): Promise<WeeklyItem[]> {
   return isWeeklyItemArray(items) ? items : [];
 }
 
-// ===== Page (Next 15: searchParams can be Promise) =====
+// ===== Page (Next 15: searchParams может быть Promise) =====
 export default async function WeeklyPage({
   searchParams,
 }: {
@@ -71,7 +72,6 @@ export default async function WeeklyPage({
       )}
 
       {/* Клиентская форма загрузки (права проверяет API) */}
-      {/* @ts-expect-error Async Server Component imports client component */}
       <UploadClient defaultCategory={category} />
 
       <div className="border-t pt-4">
@@ -104,6 +104,3 @@ export default async function WeeklyPage({
     </div>
   );
 }
-
-// Отдельный импорт клиентского компонента — вниз файла, чтобы TS не путался
-import UploadClient from "./upload.client";
