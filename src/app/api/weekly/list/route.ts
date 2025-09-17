@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     const category = (searchParams.get("category") || "").trim().toLowerCase();
     const prefix = category ? `weekly/${category}/` : `weekly/`;
 
-    // Blob
+    // Читаем файлы из Vercel Blob
     const { blobs } = await list({ prefix, limit: 1000 });
     const items: WeeklyItem[] = blobs
       .filter((b) => !b.pathname.endsWith("/"))
@@ -44,26 +44,26 @@ export async function GET(req: Request) {
           url: b.url,
           key: b.pathname,
           category: cat,
-          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
+          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(), // Date -> string
           size: b.size,
         };
       });
 
-    // Подписи из БД
+    // Подтягиваем подписи из БД (если есть элементы)
     await ensureWeeklyTable();
     if (items.length > 0) {
       const keys = items.map((i) => i.key);
-      // ВАЖНО: для ANY(...) массив передаём как sql.array(...)
       const { rows } = await sql/*sql*/`
-        SELECT key, caption FROM weekly_photos
-        WHERE key = ANY(${sql.array(keys)})
+        SELECT key, caption
+        FROM weekly_photos
+        WHERE key IN (${sql.join(keys)})
       `;
       const captions = new Map<string, string | null>();
       for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
       for (const it of items) it.caption = captions.get(it.key) ?? null;
     }
 
-    // Категории
+    // Список категорий
     const categories = Array.from(new Set(items.map((i) => i.category))).sort();
 
     return NextResponse.json({ ok: true, items, categories });
