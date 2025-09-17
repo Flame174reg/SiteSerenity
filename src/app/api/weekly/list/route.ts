@@ -44,7 +44,6 @@ export async function GET(req: Request) {
           url: b.url,
           key: b.pathname,
           category: cat,
-          // В 0.25.x это Date — конвертируем в строку
           uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
           size: b.size,
         };
@@ -54,15 +53,14 @@ export async function GET(req: Request) {
     await ensureWeeklyTable();
     if (items.length > 0) {
       const keys = items.map((i) => i.key);
+      // ВАЖНО: для ANY(...) массив передаём как sql.array(...)
       const { rows } = await sql/*sql*/`
         SELECT key, caption FROM weekly_photos
-        WHERE key = ANY(${keys});
+        WHERE key = ANY(${sql.array(keys)})
       `;
       const captions = new Map<string, string | null>();
       for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
-      for (const it of items) {
-        it.caption = captions.get(it.key) ?? null;
-      }
+      for (const it of items) it.caption = captions.get(it.key) ?? null;
     }
 
     // Категории
