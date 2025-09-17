@@ -1,162 +1,132 @@
+// src/app/weekly/upload.client.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState, useRef } from "react";
 
-export default function UploadClient({
-  defaultCategory,
-  categories,
-}: {
+type Props = {
   defaultCategory?: string;
-  categories: string[];
-}) {
-  const initial = defaultCategory && categories.includes(defaultCategory)
-    ? defaultCategory
-    : categories[0] ?? "Общая";
+  categories?: string[];
+  forcedCategorySafe?: string; // если задан — грузим строго в эту папку
+};
 
-  const [category, setCategory] = useState(initial);
-  const [addingNew, setAddingNew] = useState(false);
-  const [newCat, setNewCat] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+type UploadResp = {
+  ok: boolean;
+  key?: string;
+  url?: string;
+  categorySafe?: string;
+  reason?: string;
+  error?: string;
+};
+
+export default function UploadClient({ defaultCategory, categories = [], forcedCategorySafe }: Props) {
+  const [category, setCategory] = useState<string>(defaultCategory ?? "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    if (addingNew) setCategory("");
-    else if (!category) setCategory(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addingNew, initial]);
+  async function doUpload(file: File) {
+    setMsg(null);
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
 
-  const options = useMemo(() => {
-    const set = new Set(categories);
-    if (defaultCategory && !set.has(defaultCategory)) set.add(defaultCategory);
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [categories, defaultCategory]);
+      if (forcedCategorySafe) {
+        fd.append("forcedCategorySafe", forcedCategorySafe);
+      } else {
+        const human = (category || "general").trim();
+        fd.append("category", human);
+      }
+
+      const r = await fetch("/api/weekly/upload", { method: "POST", body: fd });
+      const raw: unknown = await r.json().catch(() => ({}));
+      const data = raw as Partial<UploadResp>;
+
+      if (!r.ok || data.ok !== true) {
+        setMsg(`Ошибка загрузки: ${data.reason ?? data.error ?? r.status}`);
+      } else {
+        // Обновляем текущую страницу папки/корня
+        window.location.reload();
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (f && f.type.startsWith("image/")) setFile(f);
-    else setMsg("Поддерживаются только изображения.");
+    if (f) void doUpload(f);
   }
 
-  // вставка из буфера
-  useEffect(() => {
-    function onPaste(e: ClipboardEvent) {
-      const cd = e.clipboardData;
-      if (!cd) return;
-      const items = cd.items;
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        if (it.kind === "file" && it.type.startsWith("image/")) {
-          const blob = it.getAsFile();
-          if (blob) {
-            const f = new File([blob], `pasted_${Date.now()}.png`, { type: blob.type });
-            setFile(f);
-            setMsg("Изображение вставлено из буфера обмена");
-            e.preventDefault();
-            return;
-          }
+  // Вставка из буфера (Clipboard API)
+  async function onPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    const items = e.clipboardData?.items ?? [];
+    for (const it of items) {
+      if (it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) {
+          await doUpload(f);
+          break;
         }
       }
     }
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, []);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-
-    const humanCat = (addingNew ? newCat : category).trim();
-    if (!humanCat) return setMsg("Укажите название папки.");
-    if (humanCat.includes("/")) return setMsg("В имени папки нельзя использовать «/».");
-    if (!file) return setMsg("Выберите файл или вставьте из буфера.");
-
-    const form = new FormData();
-    form.append("category", humanCat);
-    form.append("file", file);
-
-    setBusy(true);
-    try {
-      const res = await fetch("/api/weekly/upload", { method: "POST", body: form });
-      const data: unknown = await res.json().catch(() => ({}));
-      const ok = typeof data === "object" && data !== null && "ok" in data && (data as { ok: unknown }).ok === true;
-      if (!res.ok || !ok) {
-        const reason = typeof data === "object" && data !== null && "reason" in data ? String((data as { reason?: unknown }).reason) : "";
-        const error = typeof data === "object" && data !== null && "error" in data ? String((data as { error?: unknown }).error) : "";
-        setMsg(`Ошибка: ${reason || error || res.status}`);
-      } else {
-        const cat = typeof (data as { category?: unknown }).category === "string"
-          ? String((data as { category?: unknown }).category)
-          : humanCat;
-        setMsg("Загружено");
-        setTimeout(() => (window.location.href = `/weekly?category=${encodeURIComponent(cat)}`), 600);
-      }
-    } catch (err) {
-      setMsg(String(err));
-    } finally {
-      setBusy(false);
-    }
   }
 
-  return (
-    <form onSubmit={onSubmit} className="p-4 rounded-xl border border-white/10 bg-black/30 backdrop-blur flex flex-col gap-3">
-      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-white/90">Папка:</label>
+  const showCategoryInput = !forcedCategorySafe;
 
-          {!addingNew ? (
-            <select
+  return (
+    <div className="rounded-xl border border-white/10 p-4 bg-white/5">
+      <div
+        className="flex flex-col sm:flex-row items-start sm:items-end gap-3"
+        onPaste={onPaste}
+      >
+        {showCategoryInput ? (
+          <div className="flex flex-col">
+            <label className="text-sm text-white/70 mb-1">Категория/папка</label>
+            <input
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="bg-transparent border border-white/20 rounded px-2 py-1 text-sm text-white"
-            >
-              {options.map((c) => (
-                <option key={c} value={c} className="bg-black text-white">
-                  {c}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              value={newCat}
-              onChange={(e) => setNewCat(e.target.value)}
-              placeholder="Апрель 2025"
-              className="bg-transparent border border-white/20 rounded px-2 py-1 text-sm text-white"
+              list="weekly-cats"
+              placeholder="Напр.: Апрель 2025"
+              className="bg-transparent border border-white/20 rounded px-3 py-2 text-sm text-white w-64"
             />
-          )}
+            {/* подсказки из известных категорий */}
+            {categories.length > 0 && (
+              <datalist id="weekly-cats">
+                {categories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            )}
+            <span className="text-xs text-white/50 mt-1">
+              Можно создать новую папку, просто введя её имя.
+            </span>
+          </div>
+        ) : (
+          <div className="text-sm text-white/80">
+            Загрузка в папку: <span className="font-medium">{decodeURIComponent(forcedCategorySafe)}</span>
+          </div>
+        )}
 
-          <button
-            type="button"
-            onClick={() => setAddingNew(!addingNew)}
-            className="text-xs px-2 py-1 rounded border border-white/20 hover:bg-white/10"
-          >
-            {addingNew ? "Выбрать из списка" : "Добавить папку"}
-          </button>
-        </div>
-
-        <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-          <span className="px-3 py-1 rounded border border-white/20 bg-white/5 hover:bg-white/10 text-white">
-            Выберите файл
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={onFile}
+            disabled={busy}
+            className="text-sm"
+          />
+          <span className="text-xs text-white/60">
+            Поддерживается вставка из буфера (Ctrl/⌘+V).
           </span>
-          <input type="file" accept="image/*" onChange={onFile} className="hidden" />
-        </label>
-
-        <button
-          type="submit"
-          disabled={busy}
-          className="px-3 py-1 rounded bg-white text-black text-sm font-medium disabled:opacity-50"
-        >
-          {busy ? "Загрузка..." : "Загрузить"}
-        </button>
+        </div>
       </div>
 
-      {file && (
-        <div className="text-xs text-white/70">
-          Файл: <span className="font-mono">{file.name}</span> ({Math.round(file.size / 1024)} KB)
-        </div>
-      )}
-      <div className="text-xs text-white/60">Можно вставить изображение из буфера: <kbd>Ctrl/Cmd</kbd> + <kbd>V</kbd>.</div>
-      {msg && <div className="text-sm text-white">{msg}</div>}
-    </form>
+      {msg && <div className="mt-2 text-sm text-white/80">{msg}</div>}
+    </div>
   );
 }
