@@ -1,66 +1,77 @@
 // src/app/api/weekly/delete/route.ts
 import { NextResponse } from "next/server";
+import { del, list } from "@vercel/blob";
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
-import { del } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
 
-const OWNER_ID = "1195944713639960601";
+async function canManage() {
+  const session = await auth();
+  const id = session?.user?.id;
+  if (!id) return { ok: false as const, reason: "unauthenticated" };
 
-async function ensureTables() {
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS uploaders (
-      discord_id TEXT PRIMARY KEY,
-      role TEXT NOT NULL
-    );
-  `;
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS weekly_photos (
-      url TEXT,
-      category TEXT,
-      caption TEXT,
-      uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ
-    );
-  `;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
-  await sql/*sql*/`
-    CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);
-  `;
-}
+  const OWNER_ID = "1195944713639960601";
+  if (id === OWNER_ID) return { ok: true as const };
 
-async function isAdmin(discordId: string): Promise<boolean> {
-  await ensureTables();
-  const { rows } = await sql/*sql*/`
-    SELECT 1 FROM uploaders WHERE discord_id = ${discordId} AND role = 'admin' LIMIT 1;
-  `;
-  return rows.length > 0 || discordId === OWNER_ID;
+  try {
+    await sql/*sql*/`
+      CREATE TABLE IF NOT EXISTS uploaders (
+        discord_id TEXT PRIMARY KEY,
+        role TEXT NOT NULL
+      );
+    `;
+    const { rows } = await sql/*sql*/`
+      SELECT role FROM uploaders WHERE discord_id = ${id}
+    `;
+    if (rows[0]?.role === "admin") return { ok: true as const };
+  } catch {
+    // если БД не отвечает — лучше запретить, чем разрешить
+  }
+  return { ok: false as const, reason: "forbidden" };
 }
 
 export async function POST(req: Request) {
-  try {
-    const session = await auth();
-    const me = session?.user?.id;
-    if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
-    if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    return NextResponse.json({ ok: false, error: "no_token" }, { status: 200 });
+  }
 
-    const body: unknown = await req.json().catch(() => null);
-    const key = typeof (body as { key?: unknown })?.key === "string" ? (body as { key: string }).key : "";
-    if (!key.startsWith("weekly/")) {
-      return NextResponse.json({ ok: false, reason: "bad_key" }, { status: 400 });
+  const perm = await canManage();
+  if (!perm.ok) {
+    return NextResponse.json({ ok: false, reason: perm.reason }, { status: 200 });
+  }
+
+  type Body = { key?: unknown; safe?: unknown; all?: unknown };
+  let body: Body = {};
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    // ignore
+  }
+
+  const key = typeof body.key === "string" ? body.key : null;
+  const safe = typeof body.safe === "string" ? body.safe : null;
+  const all = body.all === true;
+
+  try {
+    if (key) {
+      await del(key, { token });
+      await sql/*sql*/`DELETE FROM weekly_photos WHERE blob_key = ${key}`;
+      return NextResponse.json({ ok: true, deleted: 1 });
     }
 
-    await ensureTables();
-    await del(key);
-    await sql/*sql*/`DELETE FROM weekly_photos WHERE key = ${key};`;
+    if (safe && all) {
+      const { blobs } = await list({ prefix: `weekly/${safe}/`, limit: 10_000, token });
+      const keys = blobs.map((b) => b.pathname);
+      if (keys.length > 0) {
+        await del(keys, { token });
+      }
+      await sql/*sql*/`DELETE FROM weekly_photos WHERE blob_key LIKE ${`weekly/${safe}/%`}`;
+      return NextResponse.json({ ok: true, deleted: keys.length });
+    }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: false, reason: "bad_request" }, { status: 200 });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
