@@ -47,13 +47,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
     }
 
-    // Кладём небольшой Blob — SDK сам выставит content-length
+    // Кладём маленький Blob — если уже есть, перезаписываем
     const blob = new Blob(["keep"], { type: "text/plain; charset=utf-8" });
 
     await put(key, blob, {
       access: "public",
       token,
       contentType: blob.type,
+      allowOverwrite: true, // <-- важное изменение
     });
 
     return NextResponse.json({ ok: true, name, safe });
