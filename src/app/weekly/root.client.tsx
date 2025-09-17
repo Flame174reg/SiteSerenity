@@ -17,9 +17,9 @@ type FoldersResp =
   | { ok: true; folders: Folder[] }
   | { ok: false; folders: Folder[]; error: string };
 
-// --- безопасный парсер: не падает, если тела нет или оно не JSON
+// Безопасный парсер тела ответа (не падает на пустом/не-JSON)
 async function readJsonSafe<T = any>(r: Response): Promise<{ json: T | null; raw: string }> {
-  const raw = await r.text(); // читаем тело ОДИН раз
+  const raw = await r.text();
   if (!raw) return { json: null, raw: "" };
   try {
     return { json: JSON.parse(raw) as T, raw };
@@ -53,7 +53,6 @@ export default function WeeklyRootClient() {
       if (json && "folders" in json) {
         setData(json);
       } else {
-        // тело пустое/не JSON — не валим приложение, а показываем диагностику
         setData({ ok: false, folders: [], error: "Пустой ответ от /api/weekly/folders" });
         console.warn("folders: non-JSON/empty response:", raw);
       }
@@ -80,11 +79,8 @@ export default function WeeklyRootClient() {
   }, []);
 
   async function onCreateFolder() {
-    const name = window
-      .prompt("Название папки (например: Апрель 2025):")
-      ?.trim();
+    const name = window.prompt("Название папки (например: Апрель 2025):")?.trim();
     if (!name) return;
-
     try {
       const r = await fetch("/api/weekly/folder/create", {
         method: "POST",
@@ -94,13 +90,15 @@ export default function WeeklyRootClient() {
       const { json, raw } = await readJsonSafe<any>(r);
 
       if (!r.ok) {
-        alert((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        const msg = ((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        alert(msg);
         return;
       }
       if (json?.ok && json?.safe) {
         window.location.href = `/weekly/${json.safe}`;
       } else {
-        alert(`Не удалось создать папку: ${(json as any)?.error ?? raw || "пустой ответ"}`);
+        const msg = (((json as any)?.error) ?? raw) || "пустой ответ";
+        alert(`Не удалось создать папку: ${msg}`);
       }
     } catch (e) {
       alert(String(e));
@@ -109,13 +107,7 @@ export default function WeeklyRootClient() {
 
   async function onDeleteFolder(safe: string) {
     if (!canManage) return;
-    if (
-      !confirm(
-        "Удалить папку целиком? Все изображения и подписи будут удалены безвозвратно."
-      )
-    )
-      return;
-
+    if (!confirm("Удалить папку целиком? Все изображения и подписи будут удалены безвозвратно.")) return;
     try {
       const r = await fetch("/api/weekly/folder/delete", {
         method: "POST",
@@ -125,7 +117,8 @@ export default function WeeklyRootClient() {
       const { json, raw } = await readJsonSafe<any>(r);
 
       if (!r.ok) {
-        alert((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        const msg = ((json as any)?.error ?? `${r.status} ${r.statusText}`);
+        alert(msg);
         return;
       }
 
@@ -136,18 +129,18 @@ export default function WeeklyRootClient() {
             ? { ok: true, folders: prev.folders.filter((f) => f.safe !== safe) }
             : prev
         );
-        // и на всякий перезагружаем
+        // и перезагружаем с сервера
         loadOnce();
       } else {
-        alert(`Не удалось удалить папку: ${(json as any)?.error ?? raw || "пустой ответ"}`);
+        const msg = (((json as any)?.error) ?? raw) || "пустой ответ";
+        alert(`Не удалось удалить папку: ${msg}`);
       }
     } catch (e) {
       alert(String(e));
     }
   }
 
-  const folders: Folder[] =
-    (data && "folders" in data && data.folders) || [];
+  const folders: Folder[] = (data && "folders" in data && data.folders) || [];
 
   return (
     <div className="space-y-4">
@@ -162,47 +155,34 @@ export default function WeeklyRootClient() {
               + Создать папку
             </button>
           )}
-          <Link
-            href="/weekly?all=1"
-            className="text-sm underline text-white/80 hover:text-white"
-          >
+          <Link href="/weekly?all=1" className="text-sm underline text-white/80 hover:text-white">
             Показать все фото
           </Link>
         </div>
       </div>
 
       <p className="text-sm text-white/70">
-        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или
-        создайте новую. Также можно загрузить фото сразу, указав название новой
-        папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую. Также можно
+        загрузить фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
-      {/* Блок "быстрой" загрузки в новую/существующую папку */}
+      {/* Быстрая загрузка в новую/существующую папку */}
       <UploadClient onUploaded={loadOnce} />
 
       {/* Список папок */}
       {loading && <div className="text-white/70">Загружаем папки…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
       {!loading && !err && folders.length === 0 && (
-        <div className="text-white/70">
-          Пока нет папок. Создайте первую — например, «Апрель 2025».
-        </div>
+        <div className="text-white/70">Пока нет папок. Создайте первую — например, «Апрель 2025».</div>
       )}
 
       {!loading && !err && folders.length > 0 && (
         <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {folders.map((f) => (
-            <li
-              key={f.safe}
-              className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5"
-            >
+            <li key={f.safe} className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5">
               <Link href={`/weekly/${f.safe}`} className="block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={f.coverUrl ?? "/icon.png"}
-                  alt={f.name}
-                  className="w-full h-56 object-cover"
-                />
+                <img src={f.coverUrl ?? "/icon.png"} alt={f.name} className="w-full h-56 object-cover" />
                 <div className="p-3">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold">{f.name}</h3>
