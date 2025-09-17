@@ -5,71 +5,82 @@ import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
-type WeeklyItem = {
+type Item = {
   url: string;
-  key: string;
-  category: string;     // человеческое имя (декодированное)
+  key: string;           // полный blob key: weekly/<safe>/<file>
+  category: string;      // человеко-читаемое имя папки
+  caption?: string | null;
   uploadedAt?: string;
   size?: number;
-  caption?: string | null;
 };
-
-async function ensureWeeklyTable() {
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS weekly_photos (
-      url TEXT,
-      category TEXT,
-      caption TEXT,
-      uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ
-    );
-  `;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
-  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
-  await sql/*sql*/`CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);`;
-}
+type Resp = { ok: boolean; items: Item[]; categories: string[] };
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const categoryHuman = (searchParams.get("category") || "").trim();
-    const safePrefix = categoryHuman ? `weekly/${encodeURIComponent(categoryHuman)}/` : `weekly/`;
+    const url = new URL(req.url);
+    const categoryHuman = url.searchParams.get("category"); // «Апрель 2025»
+    const categorySafeParam = url.searchParams.get("safe"); // «%D0%90%D0%BF...»
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
 
-    // 1) читаем из Blob по безопасному префиксу
-    const { blobs } = await list({ prefix: safePrefix, limit: 1000 });
-    const items: WeeklyItem[] = blobs
-      .filter((b) => !b.pathname.endsWith("/"))
-      .map((b) => {
-        const parts = b.pathname.split("/");
-        const catHuman = parts.length > 2 ? decodeURIComponent(parts[1]) : "Без категории";
-        return {
-          url: b.url,
-          key: b.pathname,
-          category: catHuman,
-          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
-          size: b.size,
-        };
-      });
+    // Определяем safe-сегмент
+    const safe = categorySafeParam && !categorySafeParam.includes("/")
+      ? categorySafeParam
+      : categoryHuman
+        ? encodeURIComponent(categoryHuman)
+        : null;
 
-    // 2) подмешиваем подписи из БД (совместимо со старым клиентом — по LIKE)
-    await ensureWeeklyTable();
-    const likePrefix = `${safePrefix}%`;
-    const { rows } = await sql/*sql*/`
-      SELECT key, caption FROM weekly_photos WHERE key LIKE ${likePrefix}
-    `;
-    const captions = new Map<string, string | null>();
-    for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
-    for (const it of items) it.caption = captions.get(it.key) ?? null;
+    // Список всех категорий (для подсказок) — берём папки из blob-листинга
+    const all = await list({ prefix: "weekly/", limit: 10_000, token });
+    const catsSet = new Set<string>();
+    for (const b of all.blobs) {
+      const p = b.pathname.split("/");
+      if (p.length >= 2 && p[1]) catsSet.add(decodeURIComponent(p[1]));
+    }
+    const categories = Array.from(catsSet).sort((a, b) => a.localeCompare(b, "ru"));
 
-    // 3) список категорий для выпадашки (человеческие имена)
-    const categories = Array.from(new Set(items.map((i) => i.category))).sort((a, b) => a.localeCompare(b, "ru"));
+    // Если запрашиваем конкретную категорию
+    if (safe) {
+      const { blobs } = await list({ prefix: `weekly/${safe}/`, limit: 10_000, token });
+      // отбрасываем скрытые
+      const visible = blobs.filter((b) => !b.pathname.split("/").pop()!.startsWith("."));
 
-    return NextResponse.json({ ok: true, items, categories });
+      const items: Item[] = visible.map((b) => ({
+        url: b.url,
+        key: b.pathname,
+        category: decodeURIComponent(safe),
+        uploadedAt: b.uploadedAt ? (b.uploadedAt as Date).toISOString() : undefined,
+        size: typeof (b as any).size === "number" ? (b as any).size : undefined,
+      }));
+
+      // Пытаемся подмешать подписи из БД, но если что — игнорим ошибку
+      try {
+        await sql/*sql*/`
+          CREATE TABLE IF NOT EXISTS weekly_photos (
+            blob_key TEXT PRIMARY KEY,
+            caption TEXT
+          );
+        `;
+        if (items.length > 0) {
+          // т.к. тэговый sql не умеет массивы, делаем OR через параметры
+          const ks = items.map((it) => it.key);
+          const cond = ks.map((_, i) => `blob_key = $${i + 1}`).join(" OR ");
+          const q = `SELECT blob_key, caption FROM weekly_photos WHERE ${cond}`;
+          // @ts-ignore — в runtime у sql есть метод query
+          const { rows } = await sql.query(q, ks);
+          const caps = new Map<string, string | null>();
+          for (const r of rows) caps.set(r.blob_key as string, (r.caption as string) ?? null);
+          for (const it of items) it.caption = caps.get(it.key) ?? null;
+        }
+      } catch {
+        // глушим ошибки БД — список картинок важнее
+      }
+
+      return NextResponse.json({ ok: true, items, categories } satisfies Resp);
+    }
+
+    // Иначе корень — просто список категорий (без картинок)
+    return NextResponse.json({ ok: true, items: [], categories } satisfies Resp);
   } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e), items: [], categories: [] }, { status: 200 });
+    return NextResponse.json({ ok: false, items: [], categories: [], error: String(e) } as any, { status: 200 });
   }
 }
