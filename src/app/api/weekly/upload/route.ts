@@ -8,17 +8,27 @@ export const dynamic = "force-dynamic";
 
 const OWNER_ID = "1195944713639960601";
 
-async function ensureUploadersTable() {
+async function ensureTables() {
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
       role TEXT NOT NULL
     );
   `;
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS weekly_photos (
+      key TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      category TEXT NOT NULL,
+      caption TEXT,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
 }
 
 async function isAdmin(discordId: string): Promise<boolean> {
-  await ensureUploadersTable(); // гарантируем, что таблица есть
+  await ensureTables();
   const { rows } = await sql/*sql*/`
     SELECT 1 FROM uploaders
     WHERE discord_id = ${discordId} AND role = 'admin'
@@ -31,10 +41,8 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     const me = session?.user?.id;
-    if (!me)
-      return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
-    if (!(await isAdmin(me)))
-      return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
+    if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
+    if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
     const form = await req.formData();
     const file = form.get("file");
@@ -44,7 +52,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "no_file" }, { status: 400 });
     }
     if (!category || /[^\w\-]/.test(category)) {
-      // только буквы/цифры/подчёркивание/дефис
       return NextResponse.json({ ok: false, reason: "bad_category" }, { status: 400 });
     }
 
@@ -52,18 +59,19 @@ export async function POST(req: Request) {
     const key = `weekly/${category}/${Date.now()}_${safeName}`;
 
     const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token)
-      return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
+    if (!token) return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
 
-    // Заливаем как public
     const uploaded = await put(key, file, { access: "public", token });
 
-    return NextResponse.json({
-      ok: true,
-      key,
-      url: uploaded.url,
-      size: file.size, // размер берем из исходного файла
-    });
+    // заносим карточку в БД (без подписи)
+    await sql/*sql*/`
+      INSERT INTO weekly_photos (key, url, category, uploaded_by)
+      VALUES (${key}, ${uploaded.url}, ${category}, ${me})
+      ON CONFLICT (key) DO UPDATE
+      SET url = EXCLUDED.url, category = EXCLUDED.category;
+    `;
+
+    return NextResponse.json({ ok: true, key, url: uploaded.url, size: file.size });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
