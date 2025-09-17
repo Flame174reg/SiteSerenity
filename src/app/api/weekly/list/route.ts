@@ -16,14 +16,13 @@ type Item = {
 
 type Resp = { ok: boolean; items: Item[]; categories: string[] };
 
-// Тип для объекта из list(), без any
+// Тип для объекта из list(), без any/ban-types
 type BlobItem = {
   pathname: string;
   url: string;
   uploadedAt?: Date | string;
-  // размер не гарантируется типами SDK, поэтому проверим через type guard
-  // eslint-disable-next-line @typescript-eslint/ban-types
-} & Record<string, unknown>;
+  [extra: string]: unknown; // допускаем доп. поля SDK
+};
 
 function hasNumberSize(x: unknown): x is { size: number } {
   return typeof x === "object" && x !== null && typeof (x as { size?: unknown }).size === "number";
@@ -54,7 +53,7 @@ export async function GET(req: Request) {
     // Список всех категорий (для подсказок и корневой страницы)
     const all = await list({ prefix: "weekly/", limit: 10_000, token });
     const catsSet = new Set<string>();
-    for (const b of all.blobs as unknown as BlobItem[]) {
+    for (const b of (all.blobs as unknown as BlobItem[])) {
       const p = b.pathname.split("/");
       if (p.length >= 2 && p[1]) catsSet.add(decodeURIComponent(p[1]));
     }
