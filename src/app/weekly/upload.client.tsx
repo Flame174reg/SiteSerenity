@@ -1,135 +1,156 @@
 // src/app/weekly/upload.client.tsx
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   defaultCategory?: string;
   categories?: string[];
-  forcedCategorySafe?: string; // если задан — грузим строго в эту папку
+  /** если задано — категоря фиксирована (safe-сегмент папки) */
+  forcedCategorySafe?: string;
+  /** дернуть после успешной загрузки хотя бы одного файла */
+  onUploaded?: () => void;
 };
 
-type UploadResp = {
-  ok: boolean;
-  key?: string;
-  url?: string;
-  categorySafe?: string;
-  reason?: string;
-  error?: string;
-};
+type UploadOneResp = { ok: true; key: string; url: string } | { ok: false; error?: string; reason?: string };
 
-export default function UploadClient({ defaultCategory, categories = [], forcedCategorySafe }: Props) {
-  const [category, setCategory] = useState<string>(defaultCategory ?? "");
+export default function UploadClient(props: Props) {
+  const { defaultCategory, categories, forcedCategorySafe, onUploaded } = props;
+  const [category, setCategory] = useState(defaultCategory ?? "");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [progressText, setProgressText] = useState<string | null>(null);
 
-  async function doUpload(file: File) {
-    setMsg(null);
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const canChangeCategory = !forcedCategorySafe;
 
-      if (forcedCategorySafe) {
-        fd.append("forcedCategorySafe", forcedCategorySafe);
-      } else {
-        const human = (category || "general").trim();
-        fd.append("category", human);
-      }
+  // обновляем текст категории при смене props.defaultCategory
+  useEffect(() => {
+    if (defaultCategory) setCategory(defaultCategory);
+  }, [defaultCategory]);
 
-      const r = await fetch("/api/weekly/upload", { method: "POST", body: fd });
-      const raw: unknown = await r.json().catch(() => ({}));
-      const data = raw as Partial<UploadResp>;
-
-      if (!r.ok || data.ok !== true) {
-        setMsg(`Ошибка загрузки: ${data.reason ?? data.error ?? r.status}`);
-      } else {
-        const safe = data.categorySafe ?? forcedCategorySafe ?? "";
-        // маленькая задержка + анти-кеш, чтобы листинг точно увидел новый файл
-        await new Promise((res) => setTimeout(res, 250));
-        const ts = Date.now();
-        const dest = safe ? `/weekly/${safe}?t=${ts}` : `${window.location.pathname}?t=${ts}`;
-        window.location.href = dest;
-      }
-    } catch (e) {
-      setMsg(String(e));
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) void doUpload(f);
-  }
-
-  // Вставка из буфера
-  async function onPaste(e: React.ClipboardEvent<HTMLDivElement>) {
-    const items = e.clipboardData?.items ?? [];
-    for (const it of items) {
-      if (it.type.startsWith("image/")) {
-        const f = it.getAsFile();
-        if (f) {
-          await doUpload(f);
-          break;
+  // вставка изображений из буфера
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      const files: File[] = [];
+      for (const it of items) {
+        if (it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) files.push(f);
         }
       }
+      if (files.length > 0) {
+        void handleFiles(files);
+      }
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
+  async function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length > 0) await handleFiles(files);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function handleFiles(files: File[]) {
+    if (files.length === 0) return;
+    if (!forcedCategorySafe && !category.trim()) {
+      alert("Укажите папку (категорию), либо откройте конкретную папку и загрузите туда.");
+      return;
+    }
+    setBusy(true);
+    setProgressText(`Загружаем ${files.length} шт...`);
+
+    let uploaded = 0;
+    try {
+      for (const file of files) {
+        const ok = await uploadOne(file);
+        uploaded += Number(ok);
+        setProgressText(`Загружено: ${uploaded} / ${files.length}`);
+      }
+      if (uploaded > 0 && onUploaded) onUploaded();
+    } finally {
+      setBusy(false);
+      setProgressText(null);
     }
   }
 
-  const showCategoryInput = !forcedCategorySafe;
+  async function uploadOne(file: File): Promise<boolean> {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+
+    if (forcedCategorySafe) {
+      // фиксированная папка
+      fd.append("safe", forcedCategorySafe);
+    } else {
+      // человекочитаемое имя папки — сервер сам создаст safe
+      fd.append("category", category.trim());
+    }
+
+    const r = await fetch("/api/weekly/upload", { method: "POST", body: fd });
+    const j = (await r.json()) as UploadOneResp;
+    if (!j.ok) {
+      alert(`Не удалось загрузить ${file.name}: ${j.error ?? j.reason ?? r.statusText}`);
+      return false;
+    }
+    return true;
+  }
 
   return (
-    <div className="rounded-xl border border-white/10 p-4 bg-white/5">
-      <div
-        className="flex flex-col sm:flex-row items-start sm:items-end gap-3"
-        onPaste={onPaste}
-      >
-        {showCategoryInput ? (
-          <div className="flex flex-col">
-            <label className="text-sm text-white/70 mb-1">Категория/папка</label>
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3 mb-2">
+      <div className="flex flex-col md:flex-row md:items-center gap-3">
+        <div className="flex-1">
+          <label className="block text-sm text-white/70 mb-1">Категория/папка</label>
+          {canChangeCategory ? (
             <input
+              className="w-full rounded-md bg-white/10 border border-white/20 px-3 py-2 outline-none"
+              placeholder="Напр.: Апрель 2025"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              list="weekly-cats"
-              placeholder="Напр.: Апрель 2025"
-              className="bg-transparent border border-white/20 rounded px-3 py-2 text-sm text-white w-64"
+              list={categories && categories.length ? "weekly-categories" : undefined}
             />
-            {categories.length > 0 && (
-              <datalist id="weekly-cats">
-                {categories.map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
-            )}
-            <span className="text-xs text-white/50 mt-1">
-              Можно создать новую папку, просто введя её имя.
-            </span>
+          ) : (
+            <input
+              className="w-full rounded-md bg-white/10 border border-white/20 px-3 py-2 outline-none"
+              value={decodeURIComponent(forcedCategorySafe)}
+              disabled
+            />
+          )}
+
+          {categories && categories.length > 0 && (
+            <datalist id="weekly-categories">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+          )}
+          <div className="text-xs text-white/50 mt-1">
+            Можно создать новую папку, просто введя её имя. Поддерживается вставка из буфера (Ctrl/⌘+V).
           </div>
-        ) : (
-          <div className="text-sm text-white/80">
-            Загрузка в папку: <span className="font-medium">{decodeURIComponent(forcedCategorySafe)}</span>
-          </div>
-        )}
+        </div>
 
         <div className="flex items-center gap-2">
           <input
-            ref={fileRef}
+            ref={inputRef}
             type="file"
             accept="image/*"
-            onChange={onFile}
+            multiple
+            onChange={handleInputChange}
             disabled={busy}
-            className="text-sm"
           />
-          <span className="text-xs text-white/60">
-            Поддерживается вставка из буфера (Ctrl/⌘+V).
-          </span>
+          <button
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            className="rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 px-3 py-2 disabled:opacity-60"
+          >
+            Выбрать файлы
+          </button>
         </div>
-      </div>
 
-      {msg && <div className="mt-2 text-sm text-white/80">{msg}</div>}
+        {busy && <div className="text-sm text-white/70">{progressText}</div>}
+      </div>
     </div>
   );
 }
