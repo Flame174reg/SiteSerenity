@@ -45,8 +45,12 @@ export default function UploadClient({ defaultCategory, categories = [], forcedC
       if (!r.ok || data.ok !== true) {
         setMsg(`Ошибка загрузки: ${data.reason ?? data.error ?? r.status}`);
       } else {
-        const dest = data.categorySafe ? `/weekly/${data.categorySafe}` : window.location.pathname;
-        window.location.href = dest; // <-- гарантируем попадание в нужную папку
+        const safe = data.categorySafe ?? forcedCategorySafe ?? "";
+        // маленькая задержка + анти-кеш, чтобы листинг точно увидел новый файл
+        await new Promise((res) => setTimeout(res, 250));
+        const ts = Date.now();
+        const dest = safe ? `/weekly/${safe}?t=${ts}` : `${window.location.pathname}?t=${ts}`;
+        window.location.href = dest;
       }
     } catch (e) {
       setMsg(String(e));
