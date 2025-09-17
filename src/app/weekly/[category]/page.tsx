@@ -88,6 +88,7 @@ export default async function WeeklyCategoryPage(
         <UploadClient
           defaultCategory={categoryHuman}
           categories={[categoryHuman, ...(data.categories ?? [])]}
+          forcedCategorySafe={categorySafe}
         />
 
         <p className="text-white/70 text-sm">
