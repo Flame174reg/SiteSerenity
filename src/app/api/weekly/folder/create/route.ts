@@ -5,6 +5,8 @@ import { sql } from "@vercel/postgres";
 import { put } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // гарантируем Node runtime (есть Blob/Buffer)
+
 const OWNER_ID = "1195944713639960601";
 
 async function isAdmin(id: string) {
@@ -45,15 +47,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
     }
 
-    // ⚠️ Vercel Blob 0.25+: задаём тело и contentLength явно
+    // ⚠️ Используем Blob — SDK сам возьмёт размер (content-length)
     const content = "keep";
-    const bytes = new TextEncoder().encode(content);
+    const blob = new Blob([content], { type: "text/plain; charset=utf-8" });
 
-    await put(key, bytes, {
+    await put(key, blob, {
       access: "public",
       token,
-      contentType: "text/plain; charset=utf-8",
-      contentLength: bytes.length,
+      contentType: blob.type,
+      // можно явно указать, но не обязательно:
+      contentLength: blob.size,
     });
 
     return NextResponse.json({ ok: true, name, safe });
