@@ -41,8 +41,18 @@ export async function POST(req: Request) {
     if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
     if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
-    const { key, caption } = await req.json().catch(() => ({} as any));
-    if (typeof key !== "string" || !key.startsWith("weekly/")) {
+    const raw: unknown = await req.json().catch(() => null);
+    if (typeof raw !== "object" || raw === null) {
+      return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
+    }
+
+    const body = raw as { key?: unknown; caption?: unknown };
+    const key = typeof body.key === "string" ? body.key : undefined;
+    const caption =
+      typeof body.caption === "string" ? body.caption :
+      body.caption === null ? null : undefined;
+
+    if (!key || !key.startsWith("weekly/")) {
       return NextResponse.json({ ok: false, reason: "bad_key" }, { status: 400 });
     }
 
@@ -53,7 +63,8 @@ export async function POST(req: Request) {
     await sql/*sql*/`
       INSERT INTO weekly_photos (key, url, category, caption)
       VALUES (${key}, '', ${category}, ${caption ?? null})
-      ON CONFLICT (key) DO UPDATE SET caption = EXCLUDED.caption, category = EXCLUDED.category;
+      ON CONFLICT (key) DO UPDATE
+      SET caption = EXCLUDED.caption, category = EXCLUDED.category;
     `;
 
     return NextResponse.json({ ok: true });
