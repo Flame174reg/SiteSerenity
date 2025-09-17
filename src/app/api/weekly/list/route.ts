@@ -17,13 +17,21 @@ type WeeklyItem = {
 async function ensureWeeklyTable() {
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS weekly_photos (
-      key TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      category TEXT NOT NULL,
+      url TEXT,
+      category TEXT,
       caption TEXT,
       uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+      uploaded_at TIMESTAMPTZ
     );
+  `;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
+  await sql/*sql*/`
+    CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);
   `;
 }
 
@@ -33,7 +41,6 @@ export async function GET(req: Request) {
     const category = (searchParams.get("category") || "").trim().toLowerCase();
     const prefix = category ? `weekly/${category}/` : `weekly/`;
 
-    // 1) Читаем файлы из Vercel Blob
     const { blobs } = await list({ prefix, limit: 1000 });
     const items: WeeklyItem[] = blobs
       .filter((b) => !b.pathname.endsWith("/"))
@@ -44,15 +51,15 @@ export async function GET(req: Request) {
           url: b.url,
           key: b.pathname,
           category: cat,
-          // В 0.25.x это Date — приводим к строке
           uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
           size: b.size,
         };
       });
 
-    // 2) Подписи из БД (без массивов/ANY): по префиксу
     await ensureWeeklyTable();
-    const likePrefix = `${prefix}%`; // например: 'weekly/may/%' или 'weekly/%'
+
+    // берём подписи по префиксу (совместимо с любой версией клиента)
+    const likePrefix = `${prefix}%`;
     const { rows } = await sql/*sql*/`
       SELECT key, caption
       FROM weekly_photos
@@ -62,14 +69,9 @@ export async function GET(req: Request) {
     for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
     for (const it of items) it.caption = captions.get(it.key) ?? null;
 
-    // 3) Категории
     const categories = Array.from(new Set(items.map((i) => i.category))).sort();
-
     return NextResponse.json({ ok: true, items, categories });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: String(e), items: [], categories: [] },
-      { status: 200 }
-    );
+    return NextResponse.json({ ok: false, error: String(e), items: [], categories: [] }, { status: 200 });
   }
 }
