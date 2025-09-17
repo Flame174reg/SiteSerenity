@@ -5,7 +5,7 @@ import { sql } from "@vercel/postgres";
 import { put } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
-export const runtime = "nodejs"; // гарантируем Node runtime (есть Blob/Buffer)
+export const runtime = "nodejs"; // гарантируем Node runtime
 
 const OWNER_ID = "1195944713639960601";
 
@@ -47,16 +47,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: "blob_token_missing" }, { status: 500 });
     }
 
-    // ⚠️ Используем Blob — SDK сам возьмёт размер (content-length)
-    const content = "keep";
-    const blob = new Blob([content], { type: "text/plain; charset=utf-8" });
+    // Кладём небольшой Blob — SDK сам выставит content-length
+    const blob = new Blob(["keep"], { type: "text/plain; charset=utf-8" });
 
     await put(key, blob, {
       access: "public",
       token,
       contentType: blob.type,
-      // можно явно указать, но не обязательно:
-      contentLength: blob.size,
     });
 
     return NextResponse.json({ ok: true, name, safe });
