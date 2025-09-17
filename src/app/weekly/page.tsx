@@ -1,128 +1,127 @@
 // src/app/weekly/page.tsx
-import { auth } from "@/auth";
-import { sql } from "@vercel/postgres";
-import { headers } from "next/headers";
-import UploadClient from "./upload.client";
-import GalleryClient from "./gallery.client";
+import Link from "next/link";
 
-export const dynamic = "force-dynamic";
-
-type WeeklyItem = {
-  url: string;
-  key: string;
-  category: string;
-  caption?: string | null;
-  uploadedAt?: string;
-  size?: number;
+type FoldersResp = {
+  ok: boolean;
+  folders: { name: string; safe: string; count: number; coverUrl: string | null; updatedAt?: string | null }[];
 };
 
-type RawSearchParams =
-  | Record<string, string | string[] | undefined>
-  | undefined;
-
-const OWNER_ID = "1195944713639960601";
-
-async function isAdmin(discordId: string | null | undefined) {
-  if (!discordId) return false;
-  if (discordId === OWNER_ID) return true;
-  const { rows } = await sql/*sql*/`
-    SELECT 1 FROM uploaders WHERE discord_id = ${discordId} AND role = 'admin' LIMIT 1;
-  `;
-  return rows.length > 0;
+async function getFolders(): Promise<FoldersResp["folders"]> {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/weekly/folders`, {
+    cache: "no-store",
+  }).catch(() => null);
+  const json = (await res?.json().catch(() => null)) as FoldersResp | null;
+  return json?.folders ?? [];
 }
 
-function isWeeklyItems(x: unknown): x is WeeklyItem[] {
+export default async function WeeklyRootPage() {
+  const folders = await getFolders();
+
   return (
-    Array.isArray(x) &&
-    x.every(
-      (it) =>
-        typeof it === "object" &&
-        it !== null &&
-        "url" in it &&
-        "key" in it
-    )
+    <main className="px-6 py-8">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold">Недельный актив</h1>
+          <Link
+            href="/"
+            className="text-sm text-white/80 hover:text-white border border-white/20 rounded px-3 py-1"
+          >
+            ← На главную
+          </Link>
+        </div>
+
+        <p className="text-white/70">Выберите папку, чтобы просмотреть или загрузить изображения за неделю.</p>
+
+        <CreateFolderClient />
+
+        {/* сетка папок */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {folders.map((f) => (
+            <Link
+              key={f.safe}
+              href={`/weekly/${f.safe}`}
+              className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
+            >
+              {/* обложка */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {f.coverUrl ? (
+                <img
+                  src={f.coverUrl}
+                  alt={f.name}
+                  className="h-44 w-full object-cover opacity-90 transition group-hover:scale-[1.02]"
+                />
+              ) : (
+                <div className="h-44 w-full grid place-items-center text-white/30 text-sm">
+                  (папка пуста)
+                </div>
+              )}
+
+              <div className="p-3 flex items-center justify-between">
+                <div className="text-white font-medium">{f.name}</div>
+                <div className="text-white/70 text-sm">{f.count}</div>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        {folders.length === 0 && (
+          <div className="text-white/60 text-sm">Папок пока нет — создайте первую.</div>
+        )}
+      </div>
+    </main>
   );
 }
 
-function hasItems(o: unknown): o is { items: unknown } {
-  return typeof o === "object" && o !== null && "items" in o;
-}
-function hasCategories(o: unknown): o is { categories: unknown } {
-  return typeof o === "object" && o !== null && "categories" in o;
-}
+/* ---------- КЛИЕНТ-СОЗДАТЕЛЬ ПАПОК ---------- */
+"use client";
+import { useState } from "react";
 
-async function fetchData(absBaseUrl: string, category?: string) {
-  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+function CreateFolderClient() {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
-  const resItems = await fetch(`${absBaseUrl}/api/weekly/list${qs}`, { cache: "no-store" });
-  const di: unknown = await resItems.json().catch(() => ({}));
-
-  let items: WeeklyItem[] = [];
-  if (hasItems(di) && isWeeklyItems(di.items)) items = di.items;
-
-  const resCats = await fetch(`${absBaseUrl}/api/weekly/list`, { cache: "no-store" });
-  const dc: unknown = await resCats.json().catch(() => ({}));
-
-  let categories: string[] = [];
-  if (hasCategories(dc) && Array.isArray(dc.categories)) {
-    categories = (dc.categories as unknown[]).filter((x): x is string => typeof x === "string");
+  async function create() {
+    setMsg(null);
+    const n = name.trim();
+    if (!n) return setMsg("Укажите название папки.");
+    if (n.includes("/")) return setMsg("В названии папки нельзя использовать «/».");
+    setBusy(true);
+    try {
+      const r = await fetch("/api/weekly/folder/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: n }),
+      });
+      const j: any = await r.json().catch(() => ({}));
+      if (!r.ok || j?.ok !== true) {
+        setMsg(`Ошибка: ${j?.reason ?? j?.error ?? r.status}`);
+      } else {
+        window.location.href = `/weekly/${j.safe}`;
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  return { items, categories };
-}
-
-export default async function WeeklyPage({
-  searchParams,
-}: {
-  searchParams: Promise<RawSearchParams>;
-}) {
-  const hdrs = await headers();
-  const proto = hdrs.get("x-forwarded-proto") ?? "https";
-  const host = hdrs.get("host") ?? "localhost:3000";
-  const absBaseUrl = `${proto}://${host}`;
-
-  const sp = (await searchParams) || {};
-  const rawCat = Array.isArray(sp.category) ? sp.category[0] : sp.category;
-  const category = (rawCat || "").trim().toLowerCase();
-
-  const session = await auth();
-  const myId = session?.user?.id ?? null;
-  const admin = await isAdmin(myId);
-
-  const { items, categories } = await fetchData(absBaseUrl, category);
-
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-      <h1 className="text-3xl font-bold">Недельный актив</h1>
-
-      {myId ? (
-        <div className="text-sm text-gray-300">
-          Вы вошли как: <span className="font-mono">{myId}</span>
-        </div>
-      ) : (
-        <div className="text-sm text-gray-300">
-          Войдите через Discord, чтобы загружать изображения (если вы администратор).
-        </div>
-      )}
-
-      {admin && (
-        <UploadClient
-          defaultCategory={category || "general"}
-          categories={categories}
-        />
-      )}
-
-      <div className="border-t border-white/10 pt-4">
-        <div className="mb-3 text-sm text-white/80">
-          Тут Вы можете увидеть свой актив/явку за неделю.
-        </div>
-
-        {items.length === 0 ? (
-          <div className="text-gray-400">Здесь пока пусто.</div>
-        ) : (
-          <GalleryClient items={items} isAdmin={admin} />
-        )}
-      </div>
+    <div className="flex items-center gap-2">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Например: Апрель 2025"
+        className="bg-transparent border border-white/20 rounded px-3 py-1 text-sm text-white w-64"
+      />
+      <button
+        onClick={create}
+        disabled={busy}
+        className="px-3 py-1 rounded bg-white text-black text-sm font-medium disabled:opacity-50"
+      >
+        Создать папку
+      </button>
+      {msg && <span className="text-sm text-white/80">{msg}</span>}
     </div>
   );
 }
