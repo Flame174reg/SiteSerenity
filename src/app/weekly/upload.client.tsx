@@ -9,10 +9,9 @@ export default function UploadClient({
   defaultCategory?: string;
   categories: string[];
 }) {
-  const initial =
-    defaultCategory && categories.includes(defaultCategory)
-      ? defaultCategory
-      : categories[0] ?? "general";
+  const initial = defaultCategory && categories.includes(defaultCategory)
+    ? defaultCategory
+    : categories[0] ?? "Общая";
 
   const [category, setCategory] = useState(initial);
   const [addingNew, setAddingNew] = useState(false);
@@ -22,57 +21,16 @@ export default function UploadClient({
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (addingNew) {
-      setCategory("");
-    } else if (!category) {
-      setCategory(initial);
-    }
+    if (addingNew) setCategory("");
+    else if (!category) setCategory(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addingNew, initial]);
 
   const options = useMemo(() => {
     const set = new Set(categories);
     if (defaultCategory && !set.has(defaultCategory)) set.add(defaultCategory);
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [categories, defaultCategory]);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-
-    const cat = (addingNew ? newCat : category).trim().toLowerCase();
-    if (!cat || !/^[\w\-]+$/.test(cat)) {
-      setMsg("Укажите корректное имя папки (буквы/цифры/подчёркивание/дефис).");
-      return;
-    }
-    if (!file) {
-      setMsg("Выберите файл или вставьте из буфера.");
-      return;
-    }
-
-    const form = new FormData();
-    form.append("category", cat);
-    form.append("file", file);
-
-    setBusy(true);
-    try {
-      const res = await fetch("/api/weekly/upload", { method: "POST", body: form });
-      const data: unknown = await res.json().catch(() => ({}));
-      const ok = typeof data === "object" && data !== null && "ok" in data && (data as { ok: unknown }).ok === true;
-      if (!res.ok || !ok) {
-        const reason = typeof data === "object" && data !== null && "reason" in data ? String((data as { reason?: unknown }).reason) : "";
-        const error = typeof data === "object" && data !== null && "error" in data ? String((data as { error?: unknown }).error) : "";
-        setMsg(`Ошибка: ${reason || error || res.status}`);
-      } else {
-        setMsg("Загружено");
-        setTimeout(() => (window.location.href = `/weekly?category=${encodeURIComponent(cat)}`), 600);
-      }
-    } catch (err) {
-      setMsg(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -80,12 +38,12 @@ export default function UploadClient({
     else setMsg("Поддерживаются только изображения.");
   }
 
-  // Вставка из буфера без any
+  // вставка из буфера
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       const cd = e.clipboardData;
       if (!cd) return;
-      const items = cd.items; // DataTransferItemList
+      const items = cd.items;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         if (it.kind === "file" && it.type.startsWith("image/")) {
@@ -104,11 +62,44 @@ export default function UploadClient({
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+
+    const humanCat = (addingNew ? newCat : category).trim();
+    if (!humanCat) return setMsg("Укажите название папки.");
+    if (humanCat.includes("/")) return setMsg("В имени папки нельзя использовать «/».");
+    if (!file) return setMsg("Выберите файл или вставьте из буфера.");
+
+    const form = new FormData();
+    form.append("category", humanCat);
+    form.append("file", file);
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/weekly/upload", { method: "POST", body: form });
+      const data: unknown = await res.json().catch(() => ({}));
+      const ok = typeof data === "object" && data !== null && "ok" in data && (data as { ok: unknown }).ok === true;
+      if (!res.ok || !ok) {
+        const reason = typeof data === "object" && data !== null && "reason" in data ? String((data as { reason?: unknown }).reason) : "";
+        const error = typeof data === "object" && data !== null && "error" in data ? String((data as { error?: unknown }).error) : "";
+        setMsg(`Ошибка: ${reason || error || res.status}`);
+      } else {
+        const cat = typeof (data as { category?: unknown }).category === "string"
+          ? String((data as { category?: unknown }).category)
+          : humanCat;
+        setMsg("Загружено");
+        setTimeout(() => (window.location.href = `/weekly?category=${encodeURIComponent(cat)}`), 600);
+      }
+    } catch (err) {
+      setMsg(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <form
-      onSubmit={onSubmit}
-      className="p-4 rounded-xl border border-white/10 bg-black/30 backdrop-blur flex flex-col gap-3"
-    >
+    <form onSubmit={onSubmit} className="p-4 rounded-xl border border-white/10 bg-black/30 backdrop-blur flex flex-col gap-3">
       <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
         <div className="flex items-center gap-2">
           <label className="text-sm text-white/90">Папка:</label>
@@ -129,7 +120,7 @@ export default function UploadClient({
             <input
               value={newCat}
               onChange={(e) => setNewCat(e.target.value)}
-              placeholder="новая_папка"
+              placeholder="Апрель 2025"
               className="bg-transparent border border-white/20 rounded px-2 py-1 text-sm text-white"
             />
           )}
@@ -138,7 +129,6 @@ export default function UploadClient({
             type="button"
             onClick={() => setAddingNew(!addingNew)}
             className="text-xs px-2 py-1 rounded border border-white/20 hover:bg-white/10"
-            title={addingNew ? "Выбрать из списка" : "Добавить новую папку"}
           >
             {addingNew ? "Выбрать из списка" : "Добавить папку"}
           </button>
@@ -165,10 +155,7 @@ export default function UploadClient({
           Файл: <span className="font-mono">{file.name}</span> ({Math.round(file.size / 1024)} KB)
         </div>
       )}
-      <div className="text-xs text-white/60">
-        Поддерживается вставка изображения из буфера: <kbd>Ctrl/Cmd</kbd> + <kbd>V</kbd>.
-      </div>
-
+      <div className="text-xs text-white/60">Можно вставить изображение из буфера: <kbd>Ctrl/Cmd</kbd> + <kbd>V</kbd>.</div>
       {msg && <div className="text-sm text-white">{msg}</div>}
     </form>
   );
