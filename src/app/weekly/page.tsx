@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import Image from "next/image";
 import { headers } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 // ===== Types =====
 type WeeklyItem = {
   url: string;
@@ -45,7 +47,7 @@ export default async function WeeklyPage({
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  // Абсолютный base URL прямо из заголовков запроса (наверняка корректно на проде)
+  // Абсолютный base URL из заголовков
   const hdrs = await headers();
   const proto = hdrs.get("x-forwarded-proto") ?? "https";
   const host = hdrs.get("host") ?? "localhost:3000";
@@ -76,7 +78,7 @@ export default async function WeeklyPage({
         </div>
       )}
 
-      {/* Клиентская форма загрузки (права проверяет API) */}
+      {/* Клиентская форма загрузки (поддерживает вставку из буфера и файлы с ПК) */}
       <UploadClient defaultCategory={category} />
 
       <div className="border-t pt-4">
@@ -98,6 +100,7 @@ export default async function WeeklyPage({
                     width={600}
                     height={400}
                     className="object-cover w-full h-48"
+                    unoptimized
                   />
                 </a>
                 <div className="p-2 text-xs text-gray-600 break-all">{it.key}</div>
