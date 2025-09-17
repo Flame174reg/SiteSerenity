@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import UploadClient from "./upload.client";
 
 type Folder = {
@@ -29,6 +29,7 @@ export default function WeeklyRootClient() {
   async function loadOnce() {
     try {
       setErr(null);
+      setLoading(true);
       const r = await fetch(url, { cache: "no-store" });
       const j: FoldersResp = await r.json();
       setData(j);
@@ -78,14 +79,20 @@ export default function WeeklyRootClient() {
     if (!canManage) return;
     if (!confirm("Удалить папку целиком? Все изображения и подписи будут удалены безвозвратно.")) return;
     try {
-      const r = await fetch("/api/weekly/delete", {
+      const r = await fetch("/api/weekly/folder/delete", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ safe, all: true }),
+        body: JSON.stringify({ safe }),
       });
       const j = await r.json();
       if (j?.ok) {
-        // обновим список
+        // оптимистично убираем папку из списка
+        setData(prev =>
+          prev && "folders" in prev
+            ? { ok: true, folders: prev.folders.filter(f => f.safe !== safe) }
+            : prev
+        );
+        // и на всякий — перезагружаем список
         loadOnce();
       } else {
         alert(`Не удалось удалить папку: ${j?.error ?? j?.reason ?? r.statusText}`);
@@ -117,8 +124,8 @@ export default function WeeklyRootClient() {
       </div>
 
       <p className="text-sm text-white/70">
-        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую. Также можно загрузить
-        фото сразу, указав название новой папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую.
+        Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
       {/* Блок "быстрой" загрузки в новую/существующую папку */}
@@ -128,9 +135,7 @@ export default function WeeklyRootClient() {
       {loading && <div className="text-white/70">Загружаем папки…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
       {!loading && !err && folders.length === 0 && (
-        <div className="text-white/70">
-          Пока нет папок. Создайте первую — например, «Апрель 2025».
-        </div>
+        <div className="text-white/70">Пока нет папок. Создайте первую — например, «Апрель 2025».</div>
       )}
 
       {!loading && !err && folders.length > 0 && (
