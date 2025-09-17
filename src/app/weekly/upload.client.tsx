@@ -45,8 +45,8 @@ export default function UploadClient({ defaultCategory, categories = [], forcedC
       if (!r.ok || data.ok !== true) {
         setMsg(`Ошибка загрузки: ${data.reason ?? data.error ?? r.status}`);
       } else {
-        // Обновляем текущую страницу папки/корня
-        window.location.reload();
+        const dest = data.categorySafe ? `/weekly/${data.categorySafe}` : window.location.pathname;
+        window.location.href = dest; // <-- гарантируем попадание в нужную папку
       }
     } catch (e) {
       setMsg(String(e));
@@ -61,7 +61,7 @@ export default function UploadClient({ defaultCategory, categories = [], forcedC
     if (f) void doUpload(f);
   }
 
-  // Вставка из буфера (Clipboard API)
+  // Вставка из буфера
   async function onPaste(e: React.ClipboardEvent<HTMLDivElement>) {
     const items = e.clipboardData?.items ?? [];
     for (const it of items) {
@@ -93,7 +93,6 @@ export default function UploadClient({ defaultCategory, categories = [], forcedC
               placeholder="Напр.: Апрель 2025"
               className="bg-transparent border border-white/20 rounded px-3 py-2 text-sm text-white w-64"
             />
-            {/* подсказки из известных категорий */}
             {categories.length > 0 && (
               <datalist id="weekly-cats">
                 {categories.map((c) => (
