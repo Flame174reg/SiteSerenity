@@ -3,6 +3,14 @@
 
 import { useState } from "react";
 
+type CreateFolderResponse = {
+  ok: boolean;
+  name?: string;
+  safe?: string;
+  reason?: string;
+  error?: string;
+};
+
 export default function CreateFolderClient() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,11 +28,14 @@ export default function CreateFolderClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: n }),
       });
-      const j: any = await r.json().catch(() => ({}));
-      if (!r.ok || j?.ok !== true) {
-        setMsg(`Ошибка: ${j?.reason ?? j?.error ?? r.status}`);
+
+      const raw: unknown = await r.json().catch(() => ({}));
+      const data = raw as Partial<CreateFolderResponse>;
+
+      if (!r.ok || data.ok !== true || !data.safe) {
+        setMsg(`Ошибка: ${data.reason ?? data.error ?? r.status}`);
       } else {
-        window.location.href = `/weekly/${j.safe}`;
+        window.location.href = `/weekly/${data.safe}`;
       }
     } catch (e) {
       setMsg(String(e));
