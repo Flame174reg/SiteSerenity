@@ -1,7 +1,7 @@
 // src/app/weekly/page.tsx
 import { auth } from "@/auth";
 import Image from "next/image";
-import UploadClient from "./upload.client";
+import { headers } from "next/headers";
 
 // ===== Types =====
 type WeeklyItem = {
@@ -29,10 +29,9 @@ function isWeeklyItemArray(x: unknown): x is WeeklyItem[] {
 }
 
 // ===== Data =====
-async function fetchItems(category?: string): Promise<WeeklyItem[]> {
+async function fetchItems(absBaseUrl: string, category?: string): Promise<WeeklyItem[]> {
   const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  const base = process.env.NEXT_PUBLIC_BASE_URL;
-  const endpoint = base ? `${base}/api/weekly/list${qs}` : `/api/weekly/list${qs}`;
+  const endpoint = `${absBaseUrl}/api/weekly/list${qs}`;
   const res = await fetch(endpoint, { cache: "no-store" });
   if (!res.ok) return [];
   const data: unknown = await res.json().catch(() => ({}));
@@ -46,6 +45,12 @@ export default async function WeeklyPage({
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
+  // Абсолютный base URL прямо из заголовков запроса (наверняка корректно на проде)
+  const hdrs = await headers();
+  const proto = hdrs.get("x-forwarded-proto") ?? "https";
+  const host = hdrs.get("host") ?? "localhost:3000";
+  const absBaseUrl = `${proto}://${host}`;
+
   const sp = (await searchParams) || {};
   const rawCat = Array.isArray(sp.category) ? sp.category[0] : sp.category;
   const category = (rawCat || "").trim().toLowerCase();
@@ -53,7 +58,7 @@ export default async function WeeklyPage({
   const session = await auth();
   const myId = session?.user?.id ?? null;
 
-  const items = await fetchItems(category);
+  const items = await fetchItems(absBaseUrl, category);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
@@ -104,3 +109,6 @@ export default async function WeeklyPage({
     </div>
   );
 }
+
+// Отдельный импорт клиентского компонента
+import UploadClient from "./upload.client";
