@@ -1,60 +1,82 @@
-// src/app/api/weekly/folders/route.ts
+// src/app/api/weekly/folder/delete/route.ts
 import { NextResponse } from "next/server";
-import { list } from "@vercel/blob";
+import { auth } from "@/auth";
+import { list, del } from "@vercel/blob";
+import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
-type Folder = {
-  name: string;          // человеко-читаемое (decodeURIComponent)
-  safe: string;          // url-сегмент (encodeURIComponent(name))
-  count: number;         // число видимых файлов (без скрытых .*)
-  coverUrl: string | null;
-  updatedAt?: string | null;
-};
+async function ensureTables() {
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS weekly_photos (
+      blob_key TEXT PRIMARY KEY,
+      caption  TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql/*sql*/`
+    CREATE TABLE IF NOT EXISTS uploaders (
+      discord_id TEXT PRIMARY KEY,
+      role TEXT NOT NULL
+    );
+  `;
+}
 
-export async function GET() {
+async function canManage() {
+  const session = await auth();
+  const id = session?.user?.id;
+  if (!id) return false;
+  const OWNER_ID = "1195944713639960601";
+  if (id === OWNER_ID) return true;
   try {
-    const token = process.env.BLOB_READ_WRITE_TOKEN; // на всякий случай передаём
-    const { blobs } = await list({ prefix: "weekly/", limit: 10_000, token });
+    const { rows } = await sql/*sql*/`SELECT role FROM uploaders WHERE discord_id = ${id}`;
+    return rows[0]?.role === "admin";
+  } catch {
+    return false;
+  }
+}
 
-    type BlobItem = typeof blobs[number];
-    const map = new Map<string, { name: string; items: BlobItem[] }>();
+export async function POST(req: Request) {
+  if (!(await canManage())) {
+    return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 200 });
+  }
 
-    for (const b of blobs) {
-      const parts = b.pathname.split("/");
-      if (parts.length < 2) continue; // ожидаем weekly/<safe>/...
-      const safe = parts[1];
-      if (!safe) continue;
-      const name = decodeURIComponent(safe);
-      const bucket = map.get(safe);
-      if (bucket) bucket.items.push(b);
-      else map.set(safe, { name, items: [b] });
+  let safe = "";
+  try {
+    const body = (await req.json()) as { safe?: string };
+    safe = body?.safe ?? "";
+  } catch {
+    return NextResponse.json({ ok: false, error: "bad_json" }, { status: 200 });
+  }
+  if (!safe) return NextResponse.json({ ok: false, error: "no_safe" }, { status: 200 });
+
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return NextResponse.json({ ok: false, error: "no_blob_token" }, { status: 200 });
+
+  try {
+    await ensureTables();
+
+    // список всех файлов в папке
+    const prefix = `weekly/${safe}/`;
+    const { blobs } = await list({ prefix, limit: 1000 });
+
+    const keys = blobs
+      .filter(b => !b.pathname.endsWith("/"))
+      .map(b => b.pathname); // это то же самое, что key, подходит для del()
+
+    if (keys.length > 0) {
+      // удалить blobs
+      await del(keys, { token });
+
+      // удалить подписи по ключам (простым циклом, чтобы не упираться в sql.array)
+      for (const k of keys) {
+        // eslint-disable-next-line no-await-in-loop
+        await sql/*sql*/`DELETE FROM weekly_photos WHERE blob_key = ${k}`;
+      }
     }
 
-    const folders: Folder[] = [];
-    for (const [safe, data] of map) {
-      // видимые — всё, что не начинается с точки
-      const visible = data.items.filter((it) => !it.pathname.split("/").pop()!.startsWith("."));
-      const latest = visible
-        .slice()
-        .sort((a, b) => {
-          const at = (a.uploadedAt as Date | undefined)?.getTime() ?? 0;
-          const bt = (b.uploadedAt as Date | undefined)?.getTime() ?? 0;
-          return bt - at;
-        })[0];
-
-      folders.push({
-        name: data.name,
-        safe,
-        count: visible.length,
-        coverUrl: latest?.url ?? null,
-        updatedAt: latest?.uploadedAt ? (latest.uploadedAt as Date).toISOString() : null,
-      });
-    }
-
-    folders.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-    return NextResponse.json({ ok: true, folders });
+    return NextResponse.json({ ok: true, removed: keys.length });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e), folders: [] }, { status: 200 });
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
 }
