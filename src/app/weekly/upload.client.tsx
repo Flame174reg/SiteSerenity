@@ -9,9 +9,10 @@ export default function UploadClient({
   defaultCategory?: string;
   categories: string[];
 }) {
-  const initial = defaultCategory && categories.includes(defaultCategory)
-    ? defaultCategory
-    : (categories[0] ?? "general");
+  const initial =
+    defaultCategory && categories.includes(defaultCategory)
+      ? defaultCategory
+      : categories[0] ?? "general";
 
   const [category, setCategory] = useState(initial);
   const [addingNew, setAddingNew] = useState(false);
@@ -21,9 +22,13 @@ export default function UploadClient({
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (addingNew) setCategory("");
-    else if (!category) setCategory(initial);
-  }, [addingNew]); // eslint-disable-line
+    if (addingNew) {
+      setCategory("");
+    } else if (!category) {
+      setCategory(initial);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addingNew, initial]);
 
   const options = useMemo(() => {
     const set = new Set(categories);
@@ -35,7 +40,7 @@ export default function UploadClient({
     e.preventDefault();
     setMsg(null);
 
-    const cat = addingNew ? newCat.trim().toLowerCase() : category.trim().toLowerCase();
+    const cat = (addingNew ? newCat : category).trim().toLowerCase();
     if (!cat || !/^[\w\-]+$/.test(cat)) {
       setMsg("Укажите корректное имя папки (буквы/цифры/подчёркивание/дефис).");
       return;
@@ -52,12 +57,15 @@ export default function UploadClient({
     setBusy(true);
     try {
       const res = await fetch("/api/weekly/upload", { method: "POST", body: form });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        setMsg(`Ошибка: ${data?.reason || data?.error || res.status}`);
+      const data: unknown = await res.json().catch(() => ({}));
+      const ok = typeof data === "object" && data !== null && "ok" in data && (data as { ok: unknown }).ok === true;
+      if (!res.ok || !ok) {
+        const reason = typeof data === "object" && data !== null && "reason" in data ? String((data as { reason?: unknown }).reason) : "";
+        const error = typeof data === "object" && data !== null && "error" in data ? String((data as { error?: unknown }).error) : "";
+        setMsg(`Ошибка: ${reason || error || res.status}`);
       } else {
-        setMsg(`Загружено: ${data.key}`);
-        setTimeout(() => window.location.href = `/weekly?category=${encodeURIComponent(cat)}`, 600);
+        setMsg("Загружено");
+        setTimeout(() => (window.location.href = `/weekly?category=${encodeURIComponent(cat)}`), 600);
       }
     } catch (err) {
       setMsg(String(err));
@@ -72,16 +80,19 @@ export default function UploadClient({
     else setMsg("Поддерживаются только изображения.");
   }
 
-  // вставка из буфера
+  // Вставка из буфера без any
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
-      if (!e.clipboardData) return;
-      for (const it of e.clipboardData.items as any) {
+      const cd = e.clipboardData;
+      if (!cd) return;
+      const items = cd.items; // DataTransferItemList
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
         if (it.kind === "file" && it.type.startsWith("image/")) {
           const blob = it.getAsFile();
           if (blob) {
-            const file = new File([blob], `pasted_${Date.now()}.png`, { type: blob.type });
-            setFile(file);
+            const f = new File([blob], `pasted_${Date.now()}.png`, { type: blob.type });
+            setFile(f);
             setMsg("Изображение вставлено из буфера обмена");
             e.preventDefault();
             return;
@@ -94,9 +105,11 @@ export default function UploadClient({
   }, []);
 
   return (
-    <form onSubmit={onSubmit} className="p-4 rounded-xl border border-white/10 bg-black/30 backdrop-blur flex flex-col gap-3">
+    <form
+      onSubmit={onSubmit}
+      className="p-4 rounded-xl border border-white/10 bg-black/30 backdrop-blur flex flex-col gap-3"
+    >
       <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-        {/* Категория */}
         <div className="flex items-center gap-2">
           <label className="text-sm text-white/90">Папка:</label>
 
@@ -107,7 +120,9 @@ export default function UploadClient({
               className="bg-transparent border border-white/20 rounded px-2 py-1 text-sm text-white"
             >
               {options.map((c) => (
-                <option key={c} value={c} className="bg-black text-white">{c}</option>
+                <option key={c} value={c} className="bg-black text-white">
+                  {c}
+                </option>
               ))}
             </select>
           ) : (
@@ -129,7 +144,6 @@ export default function UploadClient({
           </button>
         </div>
 
-        {/* Файл */}
         <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
           <span className="px-3 py-1 rounded border border-white/20 bg-white/5 hover:bg-white/10 text-white">
             Выберите файл
