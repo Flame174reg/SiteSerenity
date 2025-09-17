@@ -5,39 +5,36 @@ import { list } from "@vercel/blob";
 export const dynamic = "force-dynamic";
 
 type Folder = {
-  name: string;          // человеко-читаемое имя (decodeURIComponent)
-  safe: string;          // безопасный сегмент (encodeURIComponent(name))
-  count: number;         // количество видимых картинок
+  name: string;          // человеко-читаемое (decodeURIComponent)
+  safe: string;          // url-сегмент (encodeURIComponent(name))
+  count: number;         // число видимых файлов (без скрытых .*)
   coverUrl: string | null;
   updatedAt?: string | null;
 };
 
 export async function GET() {
   try {
-    const { blobs } = await list({ prefix: "weekly/", limit: 1000 });
-    type BlobItem = typeof blobs[number];
+    const token = process.env.BLOB_READ_WRITE_TOKEN; // на всякий случай передаём
+    const { blobs } = await list({ prefix: "weekly/", limit: 10_000, token });
 
-    // группируем по префиксу weekly/<safe>/...
+    type BlobItem = typeof blobs[number];
     const map = new Map<string, { name: string; items: BlobItem[] }>();
 
     for (const b of blobs) {
       const parts = b.pathname.split("/");
-      if (parts.length < 2) continue;
+      if (parts.length < 2) continue; // ожидаем weekly/<safe>/...
       const safe = parts[1];
+      if (!safe) continue;
       const name = decodeURIComponent(safe);
-
       const bucket = map.get(safe);
       if (bucket) bucket.items.push(b);
       else map.set(safe, { name, items: [b] });
     }
 
     const folders: Folder[] = [];
-
     for (const [safe, data] of map) {
-      // скрытые файлы (.keep и т.п.) не считаем
+      // видимые — всё, что не начинается с точки
       const visible = data.items.filter((it) => !it.pathname.split("/").pop()!.startsWith("."));
-
-      // обложка — последний загруженный
       const latest = visible
         .slice()
         .sort((a, b) => {
