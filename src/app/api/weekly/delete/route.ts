@@ -17,13 +17,21 @@ async function ensureTables() {
   `;
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS weekly_photos (
-      key TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      category TEXT NOT NULL,
+      url TEXT,
+      category TEXT,
       caption TEXT,
       uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+      uploaded_at TIMESTAMPTZ
     );
+  `;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS key TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS url TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS category TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS caption TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_by TEXT;`;
+  await sql/*sql*/`ALTER TABLE weekly_photos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();`;
+  await sql/*sql*/`
+    CREATE UNIQUE INDEX IF NOT EXISTS weekly_photos_key_unique ON weekly_photos(key);
   `;
 }
 
@@ -42,11 +50,13 @@ export async function POST(req: Request) {
     if (!me) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
     if (!(await isAdmin(me))) return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 });
 
-    const { key } = await req.json().catch(() => ({ key: "" as string }));
-    if (typeof key !== "string" || !key.startsWith("weekly/")) {
+    const body: unknown = await req.json().catch(() => null);
+    const key = typeof (body as { key?: unknown })?.key === "string" ? (body as { key: string }).key : "";
+    if (!key.startsWith("weekly/")) {
       return NextResponse.json({ ok: false, reason: "bad_key" }, { status: 400 });
     }
 
+    await ensureTables();
     await del(key);
     await sql/*sql*/`DELETE FROM weekly_photos WHERE key = ${key};`;
 
