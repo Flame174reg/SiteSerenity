@@ -5,6 +5,15 @@ import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
+type WeeklyItem = {
+  url: string;
+  key: string;
+  category: string;
+  uploadedAt?: string;
+  size?: number;
+  caption?: string | null;
+};
+
 async function ensureWeeklyTable() {
   await sql/*sql*/`
     CREATE TABLE IF NOT EXISTS weekly_photos (
@@ -24,8 +33,9 @@ export async function GET(req: Request) {
     const category = (searchParams.get("category") || "").trim().toLowerCase();
     const prefix = category ? `weekly/${category}/` : `weekly/`;
 
+    // Blob
     const { blobs } = await list({ prefix, limit: 1000 });
-    const items = blobs
+    const items: WeeklyItem[] = blobs
       .filter((b) => !b.pathname.endsWith("/"))
       .map((b) => {
         const parts = b.pathname.split("/");
@@ -39,7 +49,7 @@ export async function GET(req: Request) {
         };
       });
 
-    // подписи из БД
+    // Подписи из БД
     await ensureWeeklyTable();
     if (items.length > 0) {
       const keys = items.map((i) => i.key);
@@ -50,11 +60,11 @@ export async function GET(req: Request) {
       const captions = new Map<string, string | null>();
       for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
       for (const it of items) {
-        (it as any).caption = captions.get(it.key) ?? null;
+        it.caption = captions.get(it.key) ?? null;
       }
     }
 
-    // список категорий (уникальные из путей)
+    // Категории
     const categories = Array.from(new Set(items.map((i) => i.category))).sort();
 
     return NextResponse.json({ ok: true, items, categories });
