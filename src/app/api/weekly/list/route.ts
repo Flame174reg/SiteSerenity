@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     const category = (searchParams.get("category") || "").trim().toLowerCase();
     const prefix = category ? `weekly/${category}/` : `weekly/`;
 
-    // Читаем файлы из Vercel Blob
+    // 1) Читаем файлы из Vercel Blob
     const { blobs } = await list({ prefix, limit: 1000 });
     const items: WeeklyItem[] = blobs
       .filter((b) => !b.pathname.endsWith("/"))
@@ -44,30 +44,32 @@ export async function GET(req: Request) {
           url: b.url,
           key: b.pathname,
           category: cat,
-          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(), // Date -> string
+          // В 0.25.x это Date — приводим к строке
+          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
           size: b.size,
         };
       });
 
-    // Подтягиваем подписи из БД (если есть элементы)
+    // 2) Подписи из БД (без массивов/ANY): по префиксу
     await ensureWeeklyTable();
-    if (items.length > 0) {
-      const keys = items.map((i) => i.key);
-      const { rows } = await sql/*sql*/`
-        SELECT key, caption
-        FROM weekly_photos
-        WHERE key IN (${sql.join(keys)})
-      `;
-      const captions = new Map<string, string | null>();
-      for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
-      for (const it of items) it.caption = captions.get(it.key) ?? null;
-    }
+    const likePrefix = `${prefix}%`; // например: 'weekly/may/%' или 'weekly/%'
+    const { rows } = await sql/*sql*/`
+      SELECT key, caption
+      FROM weekly_photos
+      WHERE key LIKE ${likePrefix}
+    `;
+    const captions = new Map<string, string | null>();
+    for (const r of rows) captions.set(r.key as string, (r.caption as string) ?? null);
+    for (const it of items) it.caption = captions.get(it.key) ?? null;
 
-    // Список категорий
+    // 3) Категории
     const categories = Array.from(new Set(items.map((i) => i.category))).sort();
 
     return NextResponse.json({ ok: true, items, categories });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e), items: [], categories: [] }, { status: 200 });
+    return NextResponse.json(
+      { ok: false, error: String(e), items: [], categories: [] },
+      { status: 200 }
+    );
   }
 }
