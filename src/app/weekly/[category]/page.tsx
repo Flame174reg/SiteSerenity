@@ -1,6 +1,5 @@
 // src/app/weekly/[category]/page.tsx
 import Link from "next/link";
-import type { PageProps } from "next";
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 import UploadClient from "../upload.client";
@@ -53,7 +52,7 @@ async function getCategoryData(categorySafe: string): Promise<ListResp> {
 }
 
 export default async function WeeklyCategoryPage(
-  { params }: PageProps<{ category: string }>
+  { params }: { params: Promise<{ category: string }> }
 ) {
   // В Next 15 params — Promise
   const { category } = await params;
