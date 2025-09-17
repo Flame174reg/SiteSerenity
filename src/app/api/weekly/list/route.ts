@@ -44,7 +44,8 @@ export async function GET(req: Request) {
           url: b.url,
           key: b.pathname,
           category: cat,
-          uploadedAt: b.uploadedAt,
+          // В 0.25.x это Date — конвертируем в строку
+          uploadedAt: (b.uploadedAt as Date | undefined)?.toISOString(),
           size: b.size,
         };
       });
