@@ -122,7 +122,7 @@ export default function WeeklyRootClient() {
       </p>
 
       {/* Блок "быстрой" загрузки в новую/существующую папку */}
-      <UploadClient />
+      <UploadClient onUploaded={loadOnce} />
 
       {/* Список папок */}
       {loading && <div className="text-white/70">Загружаем папки…</div>}
