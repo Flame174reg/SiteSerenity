@@ -31,11 +31,27 @@ export default function WeeklyFolderClient({
   const [canManage, setCanManage] = useState(false);
   const retriesLeft = useRef(5);
 
+  const [lbIndex, setLbIndex] = useState<number | null>(null);
+  const [capDraft, setCapDraft] = useState("");
+
   const queryUrl = useMemo(() => {
     const ts = Date.now();
     const sp = new URLSearchParams({ safe: categorySafe, t: String(ts) });
     return `/api/weekly/list?${sp.toString()}`;
   }, [categorySafe]);
+
+  function currentItem(): WeeklyItem | null {
+    if (!data || !("ok" in data) || !data.ok) return null;
+    if (lbIndex == null) return null;
+    return data.items[lbIndex] ?? null;
+  }
+
+  function setItems(mutator: (prev: WeeklyItem[]) => WeeklyItem[]) {
+    setData((prev) => {
+      if (!prev || !("ok" in prev) || !prev.ok) return prev;
+      return { ...prev, items: mutator(prev.items) };
+    });
+  }
 
   async function loadOnce() {
     try {
@@ -72,6 +88,7 @@ export default function WeeklyFolderClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categorySafe]);
 
+  // ----- удаление -----
   async function onDelete(key: string) {
     if (!canManage) return;
     if (!confirm("Удалить изображение безвозвратно?")) return;
@@ -83,12 +100,13 @@ export default function WeeklyFolderClient({
       });
       const j = await r.json();
       if (j?.ok) {
-        setData((prev) => {
-          if (!prev || !("ok" in prev) || !prev.ok) return prev;
-          return {
-            ...prev,
-            items: prev.items.filter((it) => it.key !== key),
-          };
+        setItems((prev) => prev.filter((it) => it.key !== key));
+        // если удаляли из модалки — корректно закрыть/перелистнуть
+        setLbIndex((idx) => {
+          if (idx == null) return idx;
+          const newLen = (data && "ok" in data && data.ok ? data.items.length - 1 : 0);
+          if (newLen <= 0) return null;
+          return Math.min(idx, newLen - 1);
         });
       } else {
         alert(`Не удалось удалить: ${j?.error ?? j?.reason ?? r.statusText}`);
@@ -98,8 +116,53 @@ export default function WeeklyFolderClient({
     }
   }
 
+  // ----- модалка -----
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (lbIndex == null) return;
+      if (e.key === "Escape") setLbIndex(null);
+      if (e.key === "ArrowLeft") setLbIndex((i) => (i == null ? i : Math.max(0, i - 1)));
+      if (e.key === "ArrowRight") {
+        setLbIndex((i) => {
+          if (i == null) return i;
+          const items = (data && "ok" in data && data.ok ? data.items : []);
+          return Math.min(items.length - 1, i + 1);
+        });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lbIndex, data]);
+
+  useEffect(() => {
+    const it = currentItem();
+    setCapDraft(it?.caption ?? "");
+  }, [lbIndex]); // смена кадра — обновить драфт
+
+  async function saveCaption() {
+    const it = currentItem();
+    if (!it) return;
+    try {
+      const r = await fetch("/api/weekly/caption", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: it.key, caption: capDraft }),
+      });
+      const j = await r.json();
+      if (j?.ok) {
+        setItems((prev) =>
+          prev.map((x) => (x.key === it.key ? { ...x, caption: capDraft } : x)),
+        );
+      } else {
+        alert(`Не удалось сохранить подпись: ${j?.error ?? j?.reason ?? r.statusText}`);
+      }
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
   const items = (data && "ok" in data && data.ok) ? data.items : [];
-  const categories = (data && data.categories) || [];
+  const foldersList = (data && data.categories) || [];
 
   return (
     <div className="space-y-4">
@@ -111,14 +174,15 @@ export default function WeeklyFolderClient({
       </div>
 
       <p className="text-sm text-white/70">
-        Тут вы можете увидеть свой актив/явку за неделю. Загрузка идёт строго в папку{" "}
+        Тут вы можете увидеть свой актив/явку за неделю. Загрузка идёт в папку{" "}
         <span className="font-medium">{categoryHuman}</span>.
       </p>
 
       <UploadClient
         defaultCategory={categoryHuman}
-        categories={[categoryHuman, ...categories.filter((c) => c !== categoryHuman)]}
+        categories={[categoryHuman, ...foldersList.filter((c) => c !== categoryHuman)]}
         forcedCategorySafe={categorySafe}
+        onUploaded={loadOnce}
       />
 
       {loading && <div className="text-white/70">Загружаем…</div>}
@@ -130,7 +194,7 @@ export default function WeeklyFolderClient({
       {!loading && !err && data && "ok" in data && data.ok && (
         items.length > 0 ? (
           <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {items.map((it) => (
+            {items.map((it, idx) => (
               <li
                 key={it.key}
                 className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5"
@@ -140,14 +204,18 @@ export default function WeeklyFolderClient({
                 <img
                   src={it.url}
                   alt={it.caption ?? ""}
-                  className="w-full h-64 object-cover"
+                  className="w-full h-64 object-cover cursor-zoom-in"
                   loading="lazy"
+                  onClick={() => setLbIndex(idx)}
                 />
-                {it.caption ? (
-                  <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
+
+                <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
+                  {it.caption ? (
                     <p className="text-white text-sm drop-shadow">{it.caption}</p>
-                  </div>
-                ) : null}
+                  ) : (
+                    <p className="text-white/60 text-xs">Без подписи</p>
+                  )}
+                </div>
 
                 {canManage && (
                   <button
@@ -165,6 +233,78 @@ export default function WeeklyFolderClient({
         ) : (
           <div className="text-white/70">В этой папке пока нет изображений.</div>
         )
+      )}
+
+      {/* --- Модальный просмотрщик --- */}
+      {lbIndex != null && currentItem() && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
+          onClick={() => setLbIndex(null)}
+        >
+          <div className="relative max-w-[92vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={currentItem()!.url}
+              alt={currentItem()!.caption ?? ""}
+              className="max-w-[92vw] max-h-[80vh] object-contain rounded-lg"
+            />
+
+            {/* навигация */}
+            <div className="absolute inset-x-0 -bottom-14 flex items-center justify-between">
+              <button
+                onClick={() => setLbIndex((i) => (i == null ? i : Math.max(0, i - 1)))}
+                className="rounded-md bg-white/10 px-3 py-1 border border-white/20 hover:bg-white/15"
+              >
+                ← Предыдущее
+              </button>
+              <button
+                onClick={() =>
+                  setLbIndex((i) => {
+                    if (i == null) return i;
+                    return Math.min(items.length - 1, i + 1);
+                  })
+                }
+                className="rounded-md bg-white/10 px-3 py-1 border border-white/20 hover:bg-white/15"
+              >
+                Следующее →
+              </button>
+            </div>
+
+            {/* подпись + удалить */}
+            <div className="mt-4 flex items-center gap-2">
+              {canManage ? (
+                <>
+                  <input
+                    className="min-w-[40vw] rounded-md bg-white/10 border border-white/20 px-3 py-2 outline-none"
+                    placeholder="Подпись к изображению…"
+                    value={capDraft}
+                    onChange={(e) => setCapDraft(e.target.value)}
+                  />
+                  <button
+                    onClick={saveCaption}
+                    className="rounded-md bg-white/10 px-3 py-2 border border-white/20 hover:bg-white/15"
+                  >
+                    Сохранить
+                  </button>
+                  <button
+                    onClick={() => onDelete(currentItem()!.key)}
+                    className="rounded-md bg-red-500/80 hover:bg-red-500 px-3 py-2 text-white"
+                  >
+                    Удалить
+                  </button>
+                </>
+              ) : (
+                <div className="text-white/80">{currentItem()!.caption ?? "Без подписи"}</div>
+              )}
+              <button
+                onClick={() => setLbIndex(null)}
+                className="ml-auto rounded-md bg-white/10 px-3 py-2 border border-white/20 hover:bg-white/15"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
