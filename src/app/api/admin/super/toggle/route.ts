@@ -1,5 +1,5 @@
 // src/app/api/admin/super/toggle/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { auth } from "@/auth";
 
@@ -14,16 +14,16 @@ type NotOk = { ok: false; error: string };
 function isRec(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
-function str(o: Record<string, unknown>, k: string): string | null {
+function getStr(o: Record<string, unknown>, k: string): string | null {
   const v = o[k];
   return typeof v === "string" ? v : null;
 }
-function bool(o: Record<string, unknown>, k: string): boolean | null {
-  const v = o[k];
-  return typeof v === "boolean" ? v : null;
+function truthy(v: unknown): boolean {
+  return v === true || v === 1 || v === "1" || v === "true" || v === "on";
 }
 
 async function ensureSchema() {
+  // базовая таблица для ролей загрузчиков
   await sql/* sql */`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
@@ -31,40 +31,90 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  await sql/* sql */`ALTER TABLE uploaders ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'`;
+  // на случай старой схемы
+  await sql/* sql */`
+    ALTER TABLE uploaders
+    ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
+  `;
 }
 
-export async function POST(req: Request) {
+async function getMeId(req: NextRequest): Promise<string | null> {
+  // 1) пробуем next-auth напрямую
   try {
     const session = await auth();
-    const me = session?.user?.id;
+    const id =
+      (session?.user as { id?: string; email?: string; sub?: string } | null | undefined)?.id ??
+      (session?.user as { email?: string } | null | undefined)?.email ??
+      (session as { sub?: string } | null | undefined)?.sub ??
+      null;
+    if (id) return id;
+  } catch {
+    // игнорируем, попробуем дальше
+  }
+
+  // 2) через /api/auth/session с куками запроса
+  try {
+    const r = await fetch(`${req.nextUrl.origin}/api/auth/session`, {
+      headers: { cookie: req.headers.get("cookie") ?? "" },
+      cache: "no-store",
+    });
+    if (r.ok) {
+      const j = (await r.json().catch(() => null)) as unknown;
+      if (isRec(j)) {
+        const user = isRec(j.user) ? (j.user as Record<string, unknown>) : undefined;
+        const id =
+          getStr(j as Record<string, unknown>, "sub") ??
+          getStr(j as Record<string, unknown>, "userId") ??
+          (user ? (getStr(user, "id") ?? getStr(user, "email") ?? getStr(user, "sub")) : null);
+        if (id) return id;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3) фолбэки из заголовков/коков (если прокидывались с обратного прокси)
+  return (
+    req.headers.get("x-user-id") ||
+    req.cookies.get("uid")?.value ||
+    req.cookies.get("userId")?.value ||
+    null
+  );
+}
+
+async function isSuperAdminOrOwner(id: string): Promise<boolean> {
+  if (id === OWNER_ID) return true;
+  await ensureSchema();
+  const { rows } = await sql/* sql */`
+    SELECT role FROM uploaders WHERE discord_id = ${id} LIMIT 1
+  `;
+  return rows[0]?.role === "superadmin";
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const me = await getMeId(req);
     if (!me) return NextResponse.json<NotOk>({ ok: false, error: "unauthenticated" }, { status: 401 });
 
-    // менять статусы может только владелец или уже суперадмин
-    let allowed = me === OWNER_ID;
-    if (!allowed) {
-      await ensureSchema();
-      const rs = await sql/* sql */`SELECT role FROM uploaders WHERE discord_id=${me} LIMIT 1`;
-      allowed = rs.rows[0]?.role === "superadmin";
-    }
+    const allowed = await isSuperAdminOrOwner(me);
     if (!allowed) return NextResponse.json<NotOk>({ ok: false, error: "forbidden" }, { status: 403 });
 
     const body = (await req.json().catch(() => null)) as unknown;
     if (!isRec(body)) return NextResponse.json<NotOk>({ ok: false, error: "invalid json" }, { status: 400 });
 
-    const id = (str(body, "id") || "").trim();
-    const superFlag = !!bool(body, "super");
+    const id = (getStr(body, "id") || "").trim();
+    const superFlag = truthy((body as Record<string, unknown>)["super"]);
 
     if (!id) return NextResponse.json<NotOk>({ ok: false, error: "id required" }, { status: 400 });
     if (id === OWNER_ID) {
-      // владелец всегда сверхправами
+      // владелец всегда супер
       return NextResponse.json<Ok>({ ok: true, id, super: true, role: "superadmin" });
     }
 
     await ensureSchema();
 
     if (superFlag) {
-      // апгрейд до superadmin
+      // поднимаем до superadmin
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'superadmin', NOW())
@@ -73,7 +123,7 @@ export async function POST(req: Request) {
       `;
       return NextResponse.json<Ok>({ ok: true, id, super: true, role: "superadmin" });
     } else {
-      // даунгрейд с superadmin до admin (не снимаем вообще доступ)
+      // понижаем до admin (не лишаем полностью доступа загрузчика)
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'admin', NOW())
@@ -85,4 +135,8 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json<NotOk>({ ok: false, error: String(e) }, { status: 500 });
   }
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204 });
 }
