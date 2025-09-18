@@ -5,101 +5,76 @@ import { list, put } from "@vercel/blob";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return "Unknown error";
-  }
+type Ok = { ok: true; safe: string; name: string };
+type NotOk = { ok: false; error: string };
+
+function isRec(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+function getStr(o: Record<string, unknown>, k: string): string | null {
+  const v = o[k];
+  return typeof v === "string" ? v : null;
 }
 
-function resolveToken(reqToken?: string): string | undefined {
-  if (reqToken && reqToken.trim()) return reqToken.trim();
-  if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN;
-  return undefined;
+function readToken(): string | undefined {
+  return process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_READ_TOKEN || undefined;
 }
 
-const META_PREFIX = "_weekly_meta/"; // файлы метаданных лежат тут
-
-// GET /api/weekly/folder/caption?safe=<safe>
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const safe = searchParams.get("safe")?.trim();
-    if (!safe) {
-      return NextResponse.json({ ok: false, error: 'Query param "safe" is required' }, { status: 400 });
-    }
-
-    const token = resolveToken();
-    // Ищем файл метаданных
-    const ls = await list({ prefix: `${META_PREFIX}${safe}.json`, limit: 1, token });
-    const meta = ls.blobs[0];
-    if (!meta) {
-      // нет метаданных — это не ошибка
-      return NextResponse.json({ ok: true, name: null });
-    }
-
-    const r = await fetch(meta.url, { cache: "no-store" });
-    const j = await r.json().catch(() => null);
-    const name = (j && typeof j.name === "string" && j.name.trim()) || null;
-
-    return NextResponse.json({ ok: true, name });
-  } catch (err: unknown) {
-    return NextResponse.json(
-      { ok: false, error: getErrorMessage(err) },
-      { status: 500 }
-    );
-  }
+/** Разрешаем буквы/цифры/дефис/подчёркивание/процент (на случай проц. кодирования); слеши запрещены. */
+function isValidSafe(safe: string): boolean {
+  if (!safe) return false;
+  if (safe.length > 200) return false;
+  if (safe.includes("/")) return false;
+  return /^[\p{L}\p{N}\-_%]+$/u.test(safe);
 }
 
-// POST { safe: string, name: string, token?: string }
+/** Минимальная проверка, что альбом существует (есть хотя бы один blob в weekly/<safe>/) */
+async function albumExists(safe: string, token?: string): Promise<boolean> {
+  const res = await list({ prefix: `weekly/${safe}/`, limit: 1, token });
+  return res.blobs.length > 0;
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => ({}))) as {
-      safe?: string;
-      name?: string;
-      token?: string;
-    };
-
-    const safe = (body.safe ?? "").trim();
-    const name = (body.name ?? "").trim();
-    if (!safe || !name) {
-      return NextResponse.json(
-        { ok: false, error: 'Body params "safe" and "name" are required' },
-        { status: 400 }
-      );
-    }
-
-    // Лёгкая валидация safe
-    if (!/^[a-zA-Z0-9\-_]+$/.test(safe)) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid 'safe' segment" },
-        { status: 400 }
-      );
-    }
-
-    const token = resolveToken(body.token);
+    const token = readToken();
     if (!token) {
-      return NextResponse.json(
-        { ok: false, error: "Blob token is required (body.token or ENV)" },
-        { status: 400 }
-      );
+      return NextResponse.json<NotOk>({ ok: false, error: "Blob token is required" }, { status: 400 });
     }
 
-    // Сохраняем JSON с подписью. Делаем публичным, чтобы GET мог прочитать.
-    await put(
-      `${META_PREFIX}${safe}.json`,
-      JSON.stringify({ name }),
-      { access: "public", token, contentType: "application/json" }
-    );
+    const body = (await req.json().catch(() => null)) as unknown;
+    if (!isRec(body)) {
+      return NextResponse.json<NotOk>({ ok: false, error: "invalid json" }, { status: 400 });
+    }
+    const safe = (getStr(body, "safe") || "").trim();
+    const name = (getStr(body, "name") || "").trim();
 
-    return NextResponse.json({ ok: true });
+    if (!isValidSafe(safe)) {
+      return NextResponse.json<NotOk>({ ok: false, error: "Invalid 'safe' segment" }, { status: 400 });
+    }
+    if (!name) {
+      return NextResponse.json<NotOk>({ ok: false, error: "Name is required" }, { status: 400 });
+    }
+
+    // По-тихому проверим, что альбом вообще есть (не обязательно, но полезно)
+    const exists = await albumExists(safe, token);
+    if (!exists) {
+      // позволяем создавать подпись заранее, но можно и вернуть 404 — выбрал мягкий режим
+      // return NextResponse.json<NotOk>({ ok: false, error: "Album not found" }, { status: 404 });
+    }
+
+    const key = `_weekly_meta/${safe}.json`;
+    const content = JSON.stringify({ name }, null, 2);
+
+    await put(key, content, {
+      access: "public",
+      contentType: "application/json; charset=utf-8",
+      addRandomSuffix: false,
+      token,
+    });
+
+    return NextResponse.json<Ok>({ ok: true, safe, name });
   } catch (err: unknown) {
-    return NextResponse.json(
-      { ok: false, error: getErrorMessage(err) },
-      { status: 500 }
-    );
+    const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
+    return NextResponse.json<NotOk>({ ok: false, error: msg }, { status: 500 });
   }
 }
