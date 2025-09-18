@@ -3,19 +3,18 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import UploadClient from "./upload.client";
 
 type Folder = {
   name: string;
   safe: string;
   count: number;
   coverUrl: string | null;
-  updatedAt?: string | null;
-  caption?: string | null;
+  updatedAt: string | null;
+  caption: string | null;
 };
 
-type FoldersResp =
-  | { ok: true; folders: Folder[] }
-  | { ok: false; folders: Folder[]; error: string };
+type FoldersResp = { ok: true; folders: Folder[] } | { ok: false; folders: Folder[]; error: string };
 
 export default function WeeklyRootClient() {
   const [data, setData] = useState<FoldersResp | null>(null);
@@ -29,12 +28,11 @@ export default function WeeklyRootClient() {
     try {
       setErr(null);
       const r = await fetch(url, { cache: "no-store" });
-      const raw = await r.text();
-      const j = (raw ? JSON.parse(raw) : { ok: false, folders: [], error: "empty response" }) as FoldersResp;
+      const j: FoldersResp = await r.json();
       setData(j);
-      setLoading(false);
     } catch (e) {
       setErr(String(e));
+    } finally {
       setLoading(false);
     }
   }
@@ -44,8 +42,7 @@ export default function WeeklyRootClient() {
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-        const raw = await r.text();
-        const j = raw ? JSON.parse(raw) : {};
+        const j = await r.json();
         setCanManage(Boolean(j?.canUpload ?? j?.ok));
       } catch {
         setCanManage(false);
@@ -63,12 +60,11 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      const raw = await r.text();
-      const json = raw ? JSON.parse(raw) : {};
+      const json = await r.json().catch(() => ({}));
       if (json?.ok && json?.safe) {
         window.location.href = `/weekly/${json.safe}`;
       } else {
-        alert(`Не удалось создать папку: ${(json as { error?: string })?.error ?? raw ?? "пустой ответ"}`);
+        alert(`Не удалось создать папку: ${String(json?.error ?? r.statusText)}`);
       }
     } catch (e) {
       alert(String(e));
@@ -84,12 +80,31 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ safe }),
       });
-      const raw = await r.text();
-      const json = raw ? JSON.parse(raw) : {};
+      const json = await r.json().catch(() => ({}));
       if (json?.ok) {
         await loadOnce();
       } else {
-        alert(`Не удалось удалить папку: ${(json as { error?: string; reason?: string })?.error ?? raw ?? "пустой ответ"}`);
+        alert(`Не удалось удалить папку: ${String(json?.error ?? r.statusText)}`);
+      }
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
+  async function onEditFolderCaption(f: Folder) {
+    if (!canManage) return;
+    const caption = window.prompt(`Подпись для альбома «${f.name}»`, f.caption ?? "") ?? "";
+    try {
+      const r = await fetch("/api/weekly/folder/caption", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ safe: f.safe, name: f.name, caption }),
+      });
+      const json = await r.json().catch(() => ({}));
+      if (json?.ok) {
+        await loadOnce();
+      } else {
+        alert(`Не удалось сохранить подпись: ${String(json?.error ?? r.statusText)}`);
       }
     } catch (e) {
       alert(String(e));
@@ -122,13 +137,13 @@ export default function WeeklyRootClient() {
         фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
-      {/* Здесь ваш UploadClient, если нужен */}
-      {/* <UploadClient onUploaded={loadOnce} /> */}
+      {/* Быстрая загрузка в новую/существующую папку */}
+      <UploadClient onUploaded={loadOnce} />
 
       {loading && <div className="text-white/70">Загружаем папки…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
       {!loading && !err && folders.length === 0 && (
-        <div className="text-white/70">Пока нет папок. Создайте первую — например, «Апрель 2025».</div>
+        <div className="text-white/70">Пока нет папок. Создайте первую — «Апрель 2025».</div>
       )}
 
       {!loading && !err && folders.length > 0 && (
@@ -138,31 +153,43 @@ export default function WeeklyRootClient() {
               <Link href={`/weekly/${f.safe}`} className="block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={f.coverUrl ?? "/icon.png"} alt={f.name} className="w-full h-56 object-cover" />
-                <div className="p-3">
+                <div className="p-3 space-y-1">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold">{f.name}</h3>
                     <span className="text-xs text-white/60">{f.count}</span>
                   </div>
-                  {f.caption && <div className="text-xs text-white/80 mt-1 line-clamp-2">{f.caption}</div>}
+                  {f.caption && <div className="text-xs text-white mt-1">{f.caption}</div>}
                   {f.updatedAt && (
-                    <div className="text-xs text-white/50 mt-1">обновлено: {new Date(f.updatedAt).toLocaleString()}</div>
+                    <div className="text-xs text-white/50">обновлено: {new Date(f.updatedAt).toLocaleString()}</div>
                   )}
                 </div>
               </Link>
 
               {canManage && (
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDeleteFolder(f.safe);
-                  }}
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition
-                             rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
-                  title="Удалить папку"
-                >
-                  Удалить
-                </button>
+                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onEditFolderCaption(f);
+                    }}
+                    className="rounded-md bg-white/80 hover:bg-white text-black text-xs px-2 py-1"
+                    title="Изменить подпись альбома"
+                  >
+                    Подпись
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onDeleteFolder(f.safe);
+                    }}
+                    className="rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
+                    title="Удалить папку"
+                  >
+                    Удалить
+                  </button>
+                </div>
               )}
             </li>
           ))}
