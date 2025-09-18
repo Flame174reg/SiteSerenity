@@ -8,10 +8,6 @@ export const dynamic = "force-dynamic";
 type Ok = { ok: true; key: string; url: string };
 type NotOk = { ok: false; error: string; reason?: string };
 
-function isRec(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
 function slugify(human: string): string {
   return human
     .trim()
@@ -41,7 +37,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json<NotOk>({ ok: false, error: "No file provided" }, { status: 400 });
     }
 
-    // либо фиксированная safe, либо человекочитаемая категория
     const safe = (form.get("safe") as string | null)?.trim();
     const categoryHuman = (form.get("category") as string | null)?.trim();
 
@@ -56,7 +51,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // имя файла — без пробелов, русские буквы допустимы
     const cleanName = file.name.replace(/\s+/g, "_");
     const key = `weekly/${safeFolder}/${Date.now()}_${cleanName}`;
 
