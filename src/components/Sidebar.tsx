@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import AccountCard from "./AccountCard";
 
-const OWNER_ID = "1195944713639960601";
+const OWNER_ID = "1195944713639960601, 1069155545770098739";
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
