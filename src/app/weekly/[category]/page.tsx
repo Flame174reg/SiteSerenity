@@ -1,16 +1,15 @@
 // src/app/weekly/[category]/page.tsx
-
 import WeeklyFolderClient from "../folder.client";
 
-type PageProps = {
-  params: { category: string };
-};
+export default async function WeeklyCategoryPage({
+  params,
+}: {
+  params: Promise<{ category: string }>;
+}) {
+  // В Next 15.5 params промисифицирован — ждём и достаём safe-сегмент
+  const { category: categorySafe } = await params;
 
-export default function WeeklyCategoryPage({ params }: PageProps) {
-  // safe-сегмент папки из URL
-  const categorySafe = params.category;
-
-  // человекочитаемое имя — декодируем safe (если нужен иной источник — логика останется прежней)
+  // Человекочитаемое имя папки
   const categoryHuman = decodeURIComponent(categorySafe).replace(/\+/g, " ");
 
   return (
