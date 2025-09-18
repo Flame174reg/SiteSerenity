@@ -1,3 +1,4 @@
+// src/app/admin/ui/AdminClient.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -10,11 +11,8 @@ type Row = {
   lastSeen: string;
   isAdmin: boolean;
   isOwner: boolean;
-  // добавим поле локально
   isSuperAdmin?: boolean;
 };
-
-const OWNER_ID = "1195944713639960601";
 
 function discordFallback(id: string): string {
   const n = Number.isFinite(Number(id)) ? Number(id) % 5 : 0;
@@ -27,7 +25,9 @@ function pickAvatar(u: Row): string {
   try {
     const url = new URL(a);
     if (url.protocol === "http:" || url.protocol === "https:") return a;
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   return discordFallback(u.id);
 }
 
@@ -37,7 +37,6 @@ export default function AdminClient() {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // подгружаем пользователей
   useEffect(() => {
     (async () => {
       try {
@@ -46,10 +45,9 @@ export default function AdminClient() {
         const j = (await r.json()) as { users: Row[] };
         const base = (j.users || []).map((u) => ({
           ...u,
-          isSuperAdmin: u.isOwner, // владелец == суперадмин
+          isSuperAdmin: u.isOwner, // владелец = суперадмин
         }));
 
-        // затем доклеим флаги super из БД
         const ids = base.map((u) => u.id);
         const r2 = await fetch("/api/admin/roles", {
           method: "POST",
@@ -58,7 +56,10 @@ export default function AdminClient() {
           cache: "no-store",
         });
         if (r2.ok) {
-          const j2 = (await r2.json()) as { ok: boolean; roles?: Record<string, { isAdmin: boolean; isSuperAdmin: boolean }> };
+          const j2 = (await r2.json()) as {
+            ok: boolean;
+            roles?: Record<string, { isAdmin: boolean; isSuperAdmin: boolean }>;
+          };
           if (j2?.ok && j2.roles) {
             for (const u of base) {
               const role = j2.roles[u.id];
@@ -117,7 +118,6 @@ export default function AdminClient() {
             ? {
                 ...x,
                 isSuperAdmin: superFlag || x.isOwner,
-                // суперадмин автоматически считается админом
                 isAdmin: superFlag || x.isOwner || x.isAdmin,
               }
             : x
