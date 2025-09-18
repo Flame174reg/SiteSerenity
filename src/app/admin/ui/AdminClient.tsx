@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from 'next/image';
+import Image from "next/image";
 
 type Row = {
   id: string;
@@ -53,20 +53,43 @@ export default function AdminClient() {
   if (loading) return <div className="opacity-70">Загрузка…</div>;
   if (error) return <div className="text-red-400">{error}</div>;
 
+  const avatarSrc = (u: Row) =>
+    u.avatar && u.avatar.trim().length > 0
+      ? u.avatar
+      : "/images/avatar-placeholder.png";
+
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-3 text-sm opacity-70 mb-2 px-1">
-        <div>Пользователь</div><div></div><div>Последний визит</div><div>Админ</div>
+      <div className="mb-2 grid grid-cols-[auto_1fr_auto_auto] gap-3 px-1 text-sm opacity-70">
+        <div>Пользователь</div>
+        <div></div>
+        <div>Последний визит</div>
+        <div>Админ</div>
       </div>
       <ul className="space-y-2">
         {rows.map((u) => (
-          <li key={u.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
-            <img src={u.avatar || "/favicon.ico"} alt="" className="h-8 w-8 rounded-full object-cover bg-black/30" />
+          <li
+            key={u.id}
+            className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
+          >
+            <Image
+              src={avatarSrc(u)}
+              alt={u.name ?? "avatar"}
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-full object-cover"
+              priority
+            />
             <div className="min-w-0">
               <div className="truncate">{u.name || "Без имени"}</div>
-              <div className="text-xs opacity-60 truncate">ID: {u.id}{u.isOwner ? " (владелец)" : ""}</div>
+              <div className="truncate text-xs opacity-60">
+                ID: {u.id}
+                {u.isOwner ? " (владелец)" : ""}
+              </div>
             </div>
-            <div className="text-xs opacity-70">{new Date(u.lastSeen).toLocaleString("ru-RU")}</div>
+            <div className="text-xs opacity-70">
+              {new Date(u.lastSeen).toLocaleString("ru-RU")}
+            </div>
             <div>
               <input
                 type="checkbox"
@@ -78,7 +101,9 @@ export default function AdminClient() {
           </li>
         ))}
       </ul>
-      <p className="text-xs opacity-60 mt-3">Список формируется из тех, кто авторизовался хотя бы один раз.</p>
+      <p className="mt-3 text-xs opacity-60">
+        Список формируется из тех, кто авторизовался хотя бы один раз.
+      </p>
     </div>
   );
 }
