@@ -1,14 +1,16 @@
-// next.config.ts
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // Включай по желанию
+  reactStrictMode: true,
+
   images: {
+    // Разрешаем домены Vercel Blob (важно для <Image/>)
     remotePatterns: [
-      // Vercel Blob (публичные URL)
-      { protocol: "https", hostname: "**.public.blob.vercel-storage.com" },
-      // Discord аватары (на будущее, если переведёшь админку на <Image />)
-      { protocol: "https", hostname: "cdn.discordapp.com" },
-      { protocol: "https", hostname: "media.discordapp.net" },
+      {
+        protocol: 'https',
+        hostname: '**.public.blob.vercel-storage.com',
+      },
     ],
   },
 };
