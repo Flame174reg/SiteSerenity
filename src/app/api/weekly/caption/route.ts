@@ -3,72 +3,59 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function ensureTable() {
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS weekly_photos (
-      blob_key TEXT PRIMARY KEY,
-      caption  TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `;
-}
+const OWNER_ID = "1195944713639960601";
 
-async function canManage(): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const session = await auth();
-  const id = session?.user?.id;
-  if (!id) return { ok: false, reason: "unauthenticated" };
-
-  const OWNER_ID = "1195944713639960601";
-  if (id === OWNER_ID) return { ok: true };
-
+async function isAdminOrOwner(userId: string): Promise<boolean> {
+  if (userId === OWNER_ID) return true;
   try {
-    await sql/*sql*/`
-      CREATE TABLE IF NOT EXISTS uploaders (
-        discord_id TEXT PRIMARY KEY,
-        role TEXT NOT NULL
-      );
+    const { rows } = await sql/* sql */`
+      SELECT role FROM uploaders WHERE discord_id = ${userId} LIMIT 1
     `;
-    const { rows } = await sql/*sql*/`SELECT role FROM uploaders WHERE discord_id = ${id}`;
-    if (rows[0]?.role === "admin") return { ok: true };
+    return rows.length > 0 && rows[0].role === "admin";
   } catch {
-    // если БД не отвечает — лучше запретить
+    return false;
   }
-  return { ok: false, reason: "forbidden" };
 }
 
 export async function POST(req: Request) {
-  const perm = await canManage();
-  if (!perm.ok) {
-    return NextResponse.json({ ok: false, reason: perm.reason }, { status: 200 });
-  }
-
-  let body: unknown;
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "bad_json" }, { status: 200 });
-  }
+    const session = await auth();
+    const me = session?.user?.id;
+    if (!me) return NextResponse.json({ ok: false, error: "unauthenticated" }, { status: 401 });
+    if (!(await isAdminOrOwner(me))) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
 
-  const key = typeof (body as Record<string, unknown>).key === "string"
-    ? (body as Record<string, string>).key
-    : "";
-  const caption = typeof (body as Record<string, unknown>).caption === "string"
-    ? (body as Record<string, string>).caption.trim()
-    : "";
+    const body = (await req.json().catch(() => null)) as { key?: string; caption?: string | null } | null;
+    const key = (body?.key ?? "").trim();
+    const caption = body?.caption ?? null;
+    if (!key) return NextResponse.json({ ok: false, error: "key is required" }, { status: 400 });
 
-  if (!key) return NextResponse.json({ ok: false, error: "no_key" }, { status: 200 });
-
-  try {
-    await ensureTable();
-    await sql/*sql*/`
-      INSERT INTO weekly_photos (blob_key, caption)
-      VALUES (${key}, ${caption})
-      ON CONFLICT (blob_key) DO UPDATE SET caption = EXCLUDED.caption
+    await sql/* sql */`
+      CREATE TABLE IF NOT EXISTS weekly_photos (
+        key TEXT PRIMARY KEY,
+        caption TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `;
-    return NextResponse.json({ ok: true });
+    await sql/* sql */`
+      INSERT INTO weekly_photos (key, caption, updated_at)
+      VALUES (${key}, ${caption}, NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET caption = EXCLUDED.caption,
+          updated_at = NOW();
+    `;
+
+    return NextResponse.json({ ok: true, key, caption });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204 });
+}
+export function HEAD() {
+  return new Response(null, { status: 200 });
 }
