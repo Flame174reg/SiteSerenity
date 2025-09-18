@@ -13,15 +13,14 @@ type Album = {
   count: number;            // количество фото
 };
 
-type OkWithCategories = { ok: true; categories: unknown };
-type OkWithAlbums = { ok: true; albums: unknown };
-type NotOk = { ok: false; error: string; categories?: unknown; albums?: unknown };
-type ListResp = OkWithCategories | OkWithAlbums | NotOk;
-
 const COVER_URL = "https://i.ibb.co/TBZ5CXFW/logo.png";
 
 function isRec(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
 }
 
 function normalizeAlbum(a: unknown): Album {
@@ -58,11 +57,15 @@ function normalizeAlbum(a: unknown): Album {
   };
 }
 
-function extractAlbumsFromResp(j: ListResp): unknown[] {
-  if ("categories" in j) return Array.isArray(j.categories) ? j.categories : [];
-  if ("albums" in j) return Array.isArray(j.albums) ? j.albums : [];
-  if (Array.isArray((j as NotOk).categories)) return (j as NotOk).categories!;
-  if (Array.isArray((j as NotOk).albums)) return (j as NotOk).albums!;
+/** Достаём массив альбомов из произвольного ответа API, без any */
+function extractAlbumsFromResp(j: unknown): unknown[] {
+  if (!isRec(j)) return [];
+  // самые распространённые ключи
+  const fromCategories = asArray(j.categories);
+  if (fromCategories.length) return fromCategories;
+  const fromAlbums = asArray(j.albums);
+  if (fromAlbums.length) return fromAlbums;
+  // иногда прилетает как { ok:false, categories:[...] } и т.п.
   return [];
 }
 
@@ -73,21 +76,20 @@ export default function WeeklyPage() {
   const [canManage, setCanManage] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  // Загружает список альбомов (пробуем основной роут и запасной)
   const loadAlbums = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      // 1) основной вариант
+      // основной эндпоинт
       let r = await fetch("/api/weekly/list", { cache: "no-store" });
-      let j = (await r.json()) as ListResp;
+      let j: unknown = await r.json();
       let raw = extractAlbumsFromResp(j);
 
-      // 2) если пусто — пробуем запасной роут (на случай другой реализации на бэке)
+      // запасной роут (если бэк отдаёт иначе)
       if (!Array.isArray(raw) || raw.length === 0) {
         try {
           r = await fetch("/api/weekly/categories", { cache: "no-store" });
-          j = (await r.json()) as ListResp;
+          j = (await r.json()) as unknown;
           raw = extractAlbumsFromResp(j);
         } catch {
           /* ignore */
@@ -103,11 +105,10 @@ export default function WeeklyPage() {
     }
   }, []);
 
-  // Проверка права управления (админы и владелец)
   const loadCanManage = useCallback(async () => {
     try {
       const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-      const j = await r.json();
+      const j: unknown = await r.json();
       const jr = isRec(j) ? j : {};
       setCanManage(Boolean(jr.canUpload ?? jr.ok));
     } catch {
@@ -135,7 +136,7 @@ export default function WeeklyPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ safe: album.safe, name: newName }),
         });
-        const j = await r.json().catch(() => null);
+        const j: unknown = await r.json().catch(() => null);
         const ok = isRec(j) && typeof j.ok === "boolean" ? j.ok : false;
         if (!ok) {
           const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
@@ -167,7 +168,7 @@ export default function WeeklyPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ prefix }),
         });
-        const j = await r.json().catch(() => null);
+        const j: unknown = await r.json().catch(() => null);
         const ok = isRec(j) && typeof j.ok === "boolean" ? j.ok : false;
         if (!ok) {
           const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
@@ -207,13 +208,15 @@ export default function WeeklyPage() {
         Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
-      {/* форма загрузки — как раньше */}
-      <UploadClient categories={albums.map((a) => a.name)} onUploaded={loadAlbums} />
+      <UploadClient
+        categories={albums.map((a) => a.name)}
+        onUploaded={loadAlbums}
+      />
 
-      {loading && <div className="text-white/70 mt-4">Загружаем альбомы…</div>}
-      {!loading && err && <div className="text-red-400 mt-4">{err}</div>}
+      {loading && <div className="mt-4 text-white/70">Загружаем альбомы…</div>}
+      {!loading && err && <div className="mt-4 text-red-400">{err}</div>}
       {!loading && !err && albums.length === 0 && (
-        <div className="text-white/70 mt-4">Альбомов пока нет.</div>
+        <div className="mt-4 text-white/70">Альбомов пока нет.</div>
       )}
 
       {!loading && !err && albums.length > 0 && (
