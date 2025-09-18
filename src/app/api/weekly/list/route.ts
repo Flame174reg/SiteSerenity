@@ -88,7 +88,12 @@ async function listAlbumItems(prefix: string, token?: string): Promise<Item[]> {
   let cursor: string | undefined = undefined;
 
   for (;;) {
-    const res = await list({ prefix, limit: 1000, cursor, token });
+    const res: Awaited<ReturnType<typeof list>> = await list({
+      prefix,
+      limit: 1000,
+      cursor,
+      token,
+    });
     for (const b of res.blobs) {
       const it = normalizeItemFromBlob(b as unknown);
       if (it) items.push(it);
@@ -113,93 +118,4 @@ async function listAlbums(token?: string): Promise<Album[]> {
   let cursor: string | undefined = undefined;
 
   for (;;) {
-    const res = await list({ prefix: "weekly/", limit: 1000, cursor, token });
-
-    for (const b of res.blobs) {
-      const o = b as unknown as Record<string, unknown>;
-      const pathname = getStr(o, "pathname") ?? getStr(o, "key");
-      if (!pathname) continue;
-
-      const safe = albumFromPathname(pathname);
-      if (!safe) continue;
-
-      const uploadedAtStr = getStr(o, "uploadedAt");
-      const uploadedAtNum = getNum(o, "uploadedAt");
-      const uploadedAt =
-        uploadedAtStr ??
-        (uploadedAtNum !== null ? new Date(uploadedAtNum).toISOString() : null);
-
-      const prev = statMap.get(safe) || { count: 0, updatedAt: null };
-      prev.count += 1;
-      if (!prev.updatedAt || (uploadedAt && Date.parse(uploadedAt) > Date.parse(prev.updatedAt))) {
-        prev.updatedAt = uploadedAt;
-      }
-      statMap.set(safe, prev);
-    }
-
-    if (typeof res.cursor === "string" && res.cursor.length > 0) {
-      cursor = res.cursor;
-    } else {
-      break;
-    }
-  }
-
-  // Подмешиваем метаданные (подпись) из _weekly_meta/<safe>.json, если есть
-  const out: Album[] = [];
-  for (const [safe, stat] of statMap.entries()) {
-    let name = decodeURIComponent(safe);
-    try {
-      const meta = await list({ prefix: `_weekly_meta/${safe}.json`, limit: 1, token });
-      const blob = meta.blobs[0];
-      if (blob) {
-        const r = await fetch((blob as unknown as Record<string, unknown>).url as string, {
-          cache: "no-store",
-        });
-        const j = (await r.json().catch(() => null)) as unknown;
-        if (isRec(j) && typeof j.name === "string" && j.name.trim()) {
-          name = j.name.trim();
-        }
-      }
-    } catch {
-      // метаданные опциональны
-    }
-
-    out.push({ safe, name, updatedAt: stat.updatedAt, count: stat.count });
-  }
-
-  out.sort((a, b) => {
-    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
-    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
-    return tb - ta;
-  });
-
-  return out;
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const token = readToken();
-
-    const safeParam = (searchParams.get("safe") || "").trim();
-    const categoryParam = (searchParams.get("category") || "").trim();
-
-    // режим элементов одного альбома
-    if (safeParam || categoryParam) {
-      const safe = safeParam || slugify(categoryParam);
-      if (!safe) {
-        return NextResponse.json<NotOk>({ ok: false, error: "Empty category" }, { status: 400 });
-      }
-      const items = await listAlbumItems(`weekly/${safe}/`, token);
-      return NextResponse.json<OkItems>({ ok: true, items });
-    }
-
-    // режим списка альбомов
-    const categories = await listAlbums(token);
-    return NextResponse.json<OkCategories>({ ok: true, categories });
-  } catch (err: unknown) {
-    const msg =
-      err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
-    return NextResponse.json<NotOk>({ ok: false, error: msg }, { status: 500 });
-  }
-}
+    const res: Awaited<ReturnType<t
