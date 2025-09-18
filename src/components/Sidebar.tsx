@@ -3,22 +3,33 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import AccountCard from "./AccountCard";
+
+const OWNER_ID = "1195944713639960601";
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const { data: session } = useSession();
+
+  // Только владелец видит ссылку на админку
+  const meId =
+    // пробуем прямой id, затем e-mail как фолбэк
+    (session?.user as { id?: string; email?: string } | undefined)?.id ||
+    (session?.user as { email?: string } | undefined)?.email ||
+    null;
+  const isOwner = meId === OWNER_ID;
 
   // Закрывать меню при смене маршрута
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  // Блокируем прокрутку страницы, когда меню открыто
+  // Блокируем прокрутку
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "";
-    // Фокус на кнопку "закрыть" при открытии
     if (open) closeBtnRef.current?.focus();
     return () => {
       document.body.style.overflow = "";
@@ -55,7 +66,6 @@ export default function Sidebar() {
     <>
       {/* плавающая кнопка-бургер */}
       <button
-        aria-label="Открыть меню"
         onClick={() => setOpen(true)}
         className="fixed left-3 top-20 z-40 rounded-lg border border-white/10 bg-black/50 px-3 py-2 text-sm backdrop-blur hover:bg-white/10"
       >
@@ -63,27 +73,22 @@ export default function Sidebar() {
       </button>
 
       {/* затемнение */}
-      <div
-        className={`fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity ${
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-        onClick={() => setOpen(false)}
-      />
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
       {/* панель */}
       <aside
-        className={`fixed left-0 top-0 z-50 h-full w-72 max-w-[85vw] border-r border-white/10 bg-black/80 backdrop-blur-lg transition-transform duration-300 ${
+        className={`fixed left-0 top-0 z-50 h-full w-[320px] transform bg-black/70 p-4 text-sm backdrop-blur transition-transform ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
         aria-hidden={!open}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="sidebar-title"
       >
-        <div className="flex items-center justify-between px-4 h-14 border-b border-white/10">
-          <span id="sidebar-title" className="font-semibold">
-            Навигация
-          </span>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-lg font-semibold">Навигация</div>
           <button
             ref={closeBtnRef}
             onClick={() => setOpen(false)}
@@ -95,25 +100,23 @@ export default function Sidebar() {
         </div>
 
         {/* Личный кабинет / авторизация */}
-        <div className="p-3 border-b border-white/10">
-          <AccountCard />
-        </div>
+        <AccountCard />
 
-        <nav className="p-3 space-y-1 text-sm">
-          <Item href="/admin">Админ-панель</Item>
+        <div className="mt-4 space-y-3">
+          {/* Админ-панель — только владельцу */}
+          {isOwner && <Item href="/admin">Админ-панель</Item>}
+
           <Item href="/">Главная</Item>
 
-          <div className="px-3 pt-2 pb-1 text-xs uppercase opacity-60">Памятки</div>
-          <div className="ml-2 space-y-1">
-            <Item href="/memos/gov">Памятки госника</Item>
-            <Item href="/memos/interrogations">Памятка по допросам</Item>
-            <Item href="/memos/anti">Памятка против душки</Item>
-          </div>
+          <div className="px-3 pt-3 text-xs uppercase opacity-60">Памятки</div>
+          <Item href="/memo/rosgv">Памятки госника</Item>
+          <Item href="/memo/interview">Памятка по допросам</Item>
+          <Item href="/memo/psy">Памятка против душки</Item>
 
-          <div className="px-3 pt-3 pb-1 text-xs uppercase opacity-60">Документы</div>
+          <div className="px-3 pt-3 text-xs uppercase opacity-60">Документы</div>
           <Item href="/contracts">Контракты</Item>
           <Item href="/weekly">Недельный актив</Item>
-        </nav>
+        </div>
       </aside>
     </>
   );
