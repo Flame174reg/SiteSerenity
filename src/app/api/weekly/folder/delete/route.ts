@@ -21,9 +21,11 @@ async function isAdminOrOwner(userId: string): Promise<boolean> {
   }
 }
 
+// Тип ответа list() берём из самой функции, чтобы не гадать
+type ListResponse = Awaited<ReturnType<typeof list>>;
+
 export async function POST(req: Request) {
   try {
-    // --- доступ ---
     const session = await auth();
     const me = session?.user?.id;
     if (!me) {
@@ -33,48 +35,46 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
     }
 
-    // --- входные данные ---
     const body = (await req.json().catch(() => null)) as { safe?: string } | null;
     const safe = (body?.safe ?? "").trim();
     if (!safe) {
       return NextResponse.json({ ok: false, error: "safe is required" }, { status: 400 });
     }
 
-    // Токен для RW, если используется. На Vercel можно не указывать, если подключена интеграция.
     const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_TOKEN || undefined;
 
-    // Ключи в Blob хранятся как weekly/<safe>/...
     const prefix = `weekly/${safe}/`;
-
-    // --- удаляем ВСЁ в папке постранично через cursor ---
     let deleted = 0;
     let cursor: string | undefined = undefined;
 
+    // Проходим все страницы списка по cursor
+    // eslint-disable-next-line no-constant-condition
     while (true) {
-      const { blobs, cursor: nextCursor } = await list({
+      const res: ListResponse = await list({
         prefix,
         limit: 1000,
         cursor,
         token,
       });
 
-      for (const b of blobs) {
-        await del(b.url, { token });
+      if (res.blobs.length) {
+        await Promise.all(res.blobs.map((b) => del(b.url, { token })));
+        deleted += res.blobs.length;
       }
-      deleted += blobs.length;
 
-      if (!nextCursor) break;
-      cursor = nextCursor;
+      const newCursor: string | undefined = res.cursor;
+      if (!newCursor) break;
+      cursor = newCursor;
     }
 
-    // --- чистим подписи в БД (если таблица есть) ---
+    // Чистим подписи в БД (если таблица есть)
     try {
       await sql/* sql */`
         DELETE FROM weekly_photos
         WHERE key LIKE ${prefix + "%"}
       `;
     } catch {
-      // таблицы может не быть — это не критично
+      // таблицы может не быть — это ок
     }
 
     return NextResponse.json({ ok: true, safe, deleted });
@@ -84,12 +84,12 @@ export async function POST(req: Request) {
   }
 }
 
-// Поддержим DELETE тем же кодом
+// Разрешим также DELETE тем же кодом
 export async function DELETE(req: Request) {
   return POST(req);
 }
 
-// Префлайт/служебные — чтобы не ловить 405
+// Префлайт/служебные — чтобы не ловить 405 на OPTIONS/HEAD
 export function OPTIONS() {
   return new Response(null, { status: 204 });
 }
