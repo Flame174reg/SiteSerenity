@@ -3,21 +3,68 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 type Album = {
-  safe: string;                // safe-сегмент (из URL)
-  name: string;                // человекочитаемое имя
-  updatedAt: string | null;    // дата обновления
-  count: number;               // кол-во фото
+  safe: string;             // safe-сегмент (из URL)
+  name: string;             // человекочитаемое имя
+  updatedAt: string | null; // дата обновления
+  count: number;            // кол-во фото
 };
 
-type ListResp =
-  | { ok: true; categories: Album[] }
-  | { ok: true; albums: Album[] } // на случай другого поля в ответе
-  | { ok: false; error: string; categories?: Album[]; albums?: Album[] };
+type OkWithCategories = { ok: true; categories: unknown };
+type OkWithAlbums = { ok: true; albums: unknown };
+type NotOk = { ok: false; error: string; categories?: unknown; albums?: unknown };
+type ListResp = OkWithCategories | OkWithAlbums | NotOk;
 
 const COVER_URL = "https://i.ibb.co/TBZ5CXFW/logo.png";
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function normalizeAlbum(a: unknown): Album {
+  const r = isRecord(a) ? a : {};
+  const rawSafe =
+    (typeof r.safe === "string" && r.safe) ||
+    (typeof r.categorySafe === "string" && r.categorySafe) ||
+    (typeof r.id === "string" && r.id) ||
+    "";
+
+  const safe = String(rawSafe);
+
+  const rawName =
+    (typeof r.name === "string" && r.name) ||
+    (typeof r.categoryHuman === "string" && r.categoryHuman) ||
+    decodeURIComponent(safe);
+
+  const updatedAt =
+    (typeof r.updatedAt === "string" && r.updatedAt) ||
+    (typeof r.lastModified === "string" && r.lastModified) ||
+    null;
+
+  const rawCount =
+    (typeof r.count === "number" && r.count) ||
+    (typeof r.items === "number" && r.items) ||
+    (typeof r.total === "number" && r.total) ||
+    0;
+
+  return {
+    safe,
+    name: rawName || "Без названия",
+    updatedAt,
+    count: Number(rawCount),
+  };
+}
+
+function extractAlbumsFromResp(j: ListResp): unknown[] {
+  if ("categories" in j) return Array.isArray(j.categories) ? j.categories : [];
+  if ("albums" in j) return Array.isArray(j.albums) ? j.albums : [];
+  // not ok — вернём то, что пришло, если массив есть
+  if (Array.isArray(j.categories)) return j.categories;
+  if (Array.isArray(j.albums)) return j.albums;
+  return [];
+}
 
 export default function WeeklyPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -26,28 +73,16 @@ export default function WeeklyPage() {
   const [canManage, setCanManage] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  // Загружаем список альбомов и право управления
+  // загрузка списка альбомов
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch("/api/weekly/list", { cache: "no-store" });
         const j: ListResp = await r.json();
-
-        const xs = (j as any).categories ?? (j as any).albums ?? [];
-        const norm: Album[] = (xs as any[]).map((a) => ({
-          safe: String(a.safe ?? a.categorySafe ?? a.id ?? ""),
-          name:
-            String(
-              a.name ??
-                a.categoryHuman ??
-                decodeURIComponent(String(a.safe ?? a.categorySafe ?? ""))
-            ) || "Без названия",
-          updatedAt: a.updatedAt ?? a.lastModified ?? null,
-          count: Number(a.count ?? a.items ?? a.total ?? 0),
-        }));
-
+        const raw = extractAlbumsFromResp(j);
+        const norm = raw.map(normalizeAlbum);
         setAlbums(norm);
-      } catch (e) {
+      } catch {
         setErr("Не удалось загрузить список альбомов");
       } finally {
         setLoading(false);
@@ -58,14 +93,14 @@ export default function WeeklyPage() {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
         const j = await r.json();
-        setCanManage(Boolean(j?.canUpload ?? j?.ok));
+        setCanManage(Boolean((j as Record<string, unknown>)?.canUpload ?? (j as Record<string, unknown>)?.ok));
       } catch {
         setCanManage(false);
       }
     })();
   }, []);
 
-  // Обновление подписи альбома (отображаемого имени)
+  // Обновление подписи альбома (если у вас есть соответствующий API)
   const onEditAlbumCaption = useCallback(
     async (album: Album) => {
       if (!canManage) return;
@@ -80,13 +115,19 @@ export default function WeeklyPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ safe: album.safe, name: newName }),
         });
-        const j = await r.json().catch(() => ({}));
-        if (!j?.ok) {
-          alert(`Не удалось сохранить подпись: ${String(j?.error ?? r.statusText)}`);
+        const j = (await r.json().catch(() => null)) as unknown;
+        const ok =
+          isRecord(j) && "ok" in j && typeof (j as Record<string, unknown>).ok === "boolean"
+            ? Boolean((j as Record<string, unknown>).ok)
+            : false;
+        if (!ok) {
+          const msg =
+            isRecord(j) && typeof j.error === "string" ? j.error : r.statusText;
+          alert(`Не удалось сохранить подпись: ${msg}`);
           return;
         }
         setAlbums((xs) =>
-          xs.map((x) => (x.safe === album.safe ? { ...x, name: newName } : x))
+          xs.map((x) => (x.safe === album.safe ? { ...x, name: newName } : x)),
         );
       } catch (e) {
         alert(String(e));
@@ -94,26 +135,32 @@ export default function WeeklyPage() {
         setBusyKey(null);
       }
     },
-    [canManage]
+    [canManage],
   );
 
-  // Удаление альбома (папки) целиком
+  // Удаление альбома (через ваш /api/weekly/folder/delete)
   const onDeleteAlbum = useCallback(
     async (album: Album) => {
       if (!canManage) return;
       if (!confirm(`Удалить альбом «${album.name}» и все его фото?`)) return;
+
       try {
         setBusyKey(album.safe);
-        // Префикс: weekly/<safe>/
         const prefix = `weekly/${album.safe}/`;
         const r = await fetch("/api/weekly/folder/delete", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ prefix }),
         });
-        const j = await r.json().catch(() => ({}));
-        if (!j?.ok) {
-          alert(`Не удалось удалить альбом: ${String(j?.error ?? r.statusText)}`);
+        const j = (await r.json().catch(() => null)) as unknown;
+        const ok =
+          isRecord(j) && "ok" in j && typeof (j as Record<string, unknown>).ok === "boolean"
+            ? Boolean((j as Record<string, unknown>).ok)
+            : false;
+        if (!ok) {
+          const msg =
+            isRecord(j) && typeof j.error === "string" ? j.error : r.statusText;
+          alert(`Не удалось удалить альбом: ${msg}`);
           return;
         }
         setAlbums((xs) => xs.filter((x) => x.safe !== album.safe));
@@ -123,7 +170,7 @@ export default function WeeklyPage() {
         setBusyKey(null);
       }
     },
-    [canManage]
+    [canManage],
   );
 
   const formatDate = useCallback((s: string | null) => {
@@ -140,20 +187,15 @@ export default function WeeklyPage() {
     <div className="mx-auto max-w-6xl">
       <div className="mb-3 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Недельный актив</h1>
-        <Link href="/weekly/all" className="text-white/70 hover:text-white underline">
+        <Link href="/weekly/all" className="underline text-white/70 hover:text-white">
           Показать все фото
         </Link>
       </div>
 
       <p className="mb-4 text-white/70">
-        Тут вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую.
-        Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую. Также можно загрузить фото сразу,
+        указав название новой папки — она будет создана автоматически.
       </p>
-
-      {/* Форма загрузки (как и раньше) */}
-      {/* Если у вас уже вставлен UploadClient в этом файле — оставьте только один экземпляр */}
-      {/* @ts-expect-error Server/Client mixing ok if component exists in проекте */}
-      {/* <UploadClient categories={albums.map(a => a.name)} /> */}
 
       {loading && <div className="text-white/70">Загружаем альбомы…</div>}
       {!loading && err && <div className="text-red-400">{err}</div>}
@@ -166,7 +208,7 @@ export default function WeeklyPage() {
           {albums.map((a) => (
             <li
               key={a.safe}
-              className="group relative rounded-2xl border border-white/10 bg-white/5 p-0 overflow-hidden"
+              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-0"
             >
               <Link href={`/weekly/${encodeURIComponent(a.safe)}`}>
                 <div className="relative h-40 w-full">
@@ -193,7 +235,6 @@ export default function WeeklyPage() {
                     {a.count}
                   </span>
                 </div>
-
                 <div className="mt-2 text-xs text-white/60">
                   обновлено: {formatDate(a.updatedAt)}
                 </div>
