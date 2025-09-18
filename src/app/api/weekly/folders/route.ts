@@ -1,82 +1,65 @@
-// src/app/api/weekly/folder/delete/route.ts
+// src/app/api/weekly/folders/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { list, del } from "@vercel/blob";
-import { sql } from "@vercel/postgres";
+import { list } from "@vercel/blob";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function ensureTables() {
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS weekly_photos (
-      blob_key TEXT PRIMARY KEY,
-      caption  TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `;
-  await sql/*sql*/`
-    CREATE TABLE IF NOT EXISTS uploaders (
-      discord_id TEXT PRIMARY KEY,
-      role TEXT NOT NULL
-    );
-  `;
-}
+type Folder = {
+  name: string;           // человекочитаемо (decodeURIComponent(safe))
+  safe: string;           // сегмент URL (например "Апрель%202025")
+  count: number;          // сколько файлов внутри
+  coverUrl: string | null; // превью (берём первый файл)
+  updatedAt: string | null;
+};
 
-async function canManage() {
-  const session = await auth();
-  const id = session?.user?.id;
-  if (!id) return false;
-  const OWNER_ID = "1195944713639960601";
-  if (id === OWNER_ID) return true;
+export async function GET() {
   try {
-    const { rows } = await sql/*sql*/`SELECT role FROM uploaders WHERE discord_id = ${id}`;
-    return rows[0]?.role === "admin";
-  } catch {
-    return false;
-  }
-}
+    // забираем все блобы под weekly/
+    const { blobs } = await list({ prefix: "weekly/", limit: 1000 });
 
-export async function POST(req: Request) {
-  if (!(await canManage())) {
-    return NextResponse.json({ ok: false, reason: "forbidden" }, { status: 200 });
-  }
+    const map = new Map<string, Folder>();
 
-  let safe = "";
-  try {
-    const body = (await req.json()) as { safe?: string };
-    safe = body?.safe ?? "";
-  } catch {
-    return NextResponse.json({ ok: false, error: "bad_json" }, { status: 200 });
-  }
-  if (!safe) return NextResponse.json({ ok: false, error: "no_safe" }, { status: 200 });
+    for (const b of blobs) {
+      // ожидаем путь вида weekly/<safe>/<file>
+      const parts = b.pathname.split("/");
+      if (parts.length < 3) continue;
 
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return NextResponse.json({ ok: false, error: "no_blob_token" }, { status: 200 });
+      const safe = parts[1];
+      const name = decodeURIComponent(safe);
 
-  try {
-    await ensureTables();
-
-    // список всех файлов в папке
-    const prefix = `weekly/${safe}/`;
-    const { blobs } = await list({ prefix, limit: 1000 });
-
-    const keys = blobs
-      .filter(b => !b.pathname.endsWith("/"))
-      .map(b => b.pathname); // это то же самое, что key, подходит для del()
-
-    if (keys.length > 0) {
-      // удалить blobs
-      await del(keys, { token });
-
-      // удалить подписи по ключам (простым циклом, чтобы не упираться в sql.array)
-      for (const k of keys) {
-        // eslint-disable-next-line no-await-in-loop
-        await sql/*sql*/`DELETE FROM weekly_photos WHERE blob_key = ${k}`;
+      let f = map.get(safe);
+      if (!f) {
+        f = { name, safe, count: 0, coverUrl: null, updatedAt: null };
+        map.set(safe, f);
       }
+
+      f.count += 1;
+      if (!f.coverUrl) f.coverUrl = b.url;
+
+      const u = b.uploadedAt ? new Date(b.uploadedAt).toISOString() : null;
+      if (!f.updatedAt || (u && u > f.updatedAt)) f.updatedAt = u;
     }
 
-    return NextResponse.json({ ok: true, removed: keys.length });
+    // Можно отсортировать по дате обновления (новые сверху)
+    const folders = Array.from(map.values()).sort((a, b) => {
+      return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+    });
+
+    return NextResponse.json({ ok: true, folders });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
+    return NextResponse.json(
+      { ok: false, folders: [], error: String(e) },
+      { status: 200 }
+    );
   }
+}
+
+// На всякий случай — чтобы не словить 405 на префлайтах/HEAD
+export function HEAD() {
+  return new Response(null, { status: 200 });
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204 });
 }
