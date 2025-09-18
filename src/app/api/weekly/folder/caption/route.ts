@@ -1,73 +1,105 @@
 // src/app/api/weekly/folder/caption/route.ts
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { sql } from "@vercel/postgres";
+import { NextRequest, NextResponse } from "next/server";
+import { list, put } from "@vercel/blob";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const OWNER_ID = "1195944713639960601";
-
-async function isAdminOrOwner(userId: string): Promise<boolean> {
-  if (userId === OWNER_ID) return true;
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
   try {
-    const { rows } = await sql/* sql */`
-      SELECT role FROM uploaders WHERE discord_id = ${userId} LIMIT 1
-    `;
-    return rows.length > 0 && rows[0].role === "admin";
+    return JSON.stringify(err);
   } catch {
-    return false;
+    return "Unknown error";
   }
 }
 
-async function ensureSchema() {
-  await sql/* sql */`
-    CREATE TABLE IF NOT EXISTS weekly_albums (
-      safe TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      caption TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ
-    );
-  `;
+function resolveToken(reqToken?: string): string | undefined {
+  if (reqToken && reqToken.trim()) return reqToken.trim();
+  if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN;
+  return undefined;
 }
 
-export async function POST(req: Request) {
+const META_PREFIX = "_weekly_meta/"; // файлы метаданных лежат тут
+
+// GET /api/weekly/folder/caption?safe=<safe>
+export async function GET(req: NextRequest) {
   try {
-    const session = await auth();
-    const me = session?.user?.id;
-    if (!me) return NextResponse.json({ ok: false, error: "unauthenticated" }, { status: 401 });
-    if (!(await isAdminOrOwner(me))) {
-      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    const { searchParams } = new URL(req.url);
+    const safe = searchParams.get("safe")?.trim();
+    if (!safe) {
+      return NextResponse.json({ ok: false, error: 'Query param "safe" is required' }, { status: 400 });
     }
 
-    const body = (await req.json().catch(() => null)) as { safe?: string; name?: string; caption?: string } | null;
-    const safe = (body?.safe ?? "").trim();
-    const name = (body?.name ?? decodeURIComponent(safe)).trim();
-    const caption = (body?.caption ?? "").trim();
+    const token = resolveToken();
+    // Ищем файл метаданных
+    const ls = await list({ prefix: `${META_PREFIX}${safe}.json`, limit: 1, token });
+    const meta = ls.blobs[0];
+    if (!meta) {
+      // нет метаданных — это не ошибка
+      return NextResponse.json({ ok: true, name: null });
+    }
 
-    if (!safe) return NextResponse.json({ ok: false, error: "safe is required" }, { status: 400 });
+    const r = await fetch(meta.url, { cache: "no-store" });
+    const j = await r.json().catch(() => null);
+    const name = (j && typeof j.name === "string" && j.name.trim()) || null;
 
-    await ensureSchema();
-
-    await sql/* sql */`
-      INSERT INTO weekly_albums (safe, name, caption, updated_at)
-      VALUES (${safe}, ${name}, ${caption || null}, NOW())
-      ON CONFLICT (safe) DO UPDATE
-      SET name = EXCLUDED.name,
-          caption = EXCLUDED.caption,
-          updated_at = NOW();
-    `;
-
-    return NextResponse.json({ ok: true, safe, name, caption: caption || null });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
+    return NextResponse.json({ ok: true, name });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { ok: false, error: getErrorMessage(err) },
+      { status: 500 }
+    );
   }
 }
 
-export function OPTIONS() {
-  return new Response(null, { status: 204 });
-}
-export function HEAD() {
-  return new Response(null, { status: 200 });
+// POST { safe: string, name: string, token?: string }
+export async function POST(req: NextRequest) {
+  try {
+    const body = (await req.json().catch(() => ({}))) as {
+      safe?: string;
+      name?: string;
+      token?: string;
+    };
+
+    const safe = (body.safe ?? "").trim();
+    const name = (body.name ?? "").trim();
+    if (!safe || !name) {
+      return NextResponse.json(
+        { ok: false, error: 'Body params "safe" and "name" are required' },
+        { status: 400 }
+      );
+    }
+
+    // Лёгкая валидация safe
+    if (!/^[a-zA-Z0-9\-_]+$/.test(safe)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid 'safe' segment" },
+        { status: 400 }
+      );
+    }
+
+    const token = resolveToken(body.token);
+    if (!token) {
+      return NextResponse.json(
+        { ok: false, error: "Blob token is required (body.token or ENV)" },
+        { status: 400 }
+      );
+    }
+
+    // Сохраняем JSON с подписью. Делаем публичным, чтобы GET мог прочитать.
+    await put(
+      `${META_PREFIX}${safe}.json`,
+      JSON.stringify({ name }),
+      { access: "public", token, contentType: "application/json" }
+    );
+
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { ok: false, error: getErrorMessage(err) },
+      { status: 500 }
+    );
+  }
 }
