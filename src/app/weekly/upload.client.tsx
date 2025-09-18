@@ -1,7 +1,7 @@
 // src/app/weekly/upload.client.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useCallback, useState } from 'react';
 
 type Props = {
   defaultCategory?: string;
