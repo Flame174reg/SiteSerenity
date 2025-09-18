@@ -20,6 +20,29 @@ function isRec(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+function normalizeItem(v: unknown): Item {
+  const r = isRec(v) ? v : {};
+  const url = typeof r.url === "string" ? r.url : "";
+  const key = typeof r.key === "string" ? r.key : "";
+  const category = typeof r.category === "string" ? r.category : "";
+  const uploadedAt =
+    typeof r.uploadedAt === "string" ? r.uploadedAt : null;
+  const size =
+    typeof r.size === "number" ? r.size : r.size === null ? null : undefined;
+  const caption =
+    typeof r.caption === "string" ? r.caption : r.caption === null ? null : undefined;
+
+  return { url, key, category, uploadedAt, size, caption };
+}
+
+function parseItems(resp: unknown): Item[] {
+  if (!isRec(resp)) return [];
+  const val = resp.items;
+  if (!Array.isArray(val)) return [];
+  // Нормализуем и отбрасываем заведомо битые записи без ключевых полей
+  return val.map(normalizeItem).filter((it) => it.url !== "" && it.key !== "");
+}
+
 export default function FolderClient(
   { safe, name }: { safe: string; name: string }
 ) {
@@ -28,13 +51,12 @@ export default function FolderClient(
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
 
-  // 1) основной путь: спрашиваем БЭК по safe
+  // основной запрос по safe
   const listUrlSafe = useMemo(
     () => `/api/weekly/list?safe=${encodeURIComponent(safe)}&t=${Date.now()}`,
     [safe]
   );
-
-  // 2) запасной: попробовать по человекочитаемому имени (если вдруг API ждёт его)
+  // фолбэк по человекочитаемому имени
   const listUrlByName = useMemo(
     () => `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`,
     [name]
@@ -45,18 +67,16 @@ export default function FolderClient(
       setLoading(true);
       setErr(null);
       try {
-        // сначала пытаемся по safe
+        // 1) пробуем по safe
         let r = await fetch(listUrlSafe, { cache: "no-store" });
         let j: unknown = await r.json();
-        let items: Item[] =
-          isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+        let items = parseItems(j);
 
-        // если пусто — пробуем фолбэк по name
+        // 2) если пусто — пробуем по name (на случай иной реализации бэка)
         if (items.length === 0 && name && name !== safe) {
           r = await fetch(listUrlByName, { cache: "no-store" });
           j = await r.json();
-          items =
-            isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+          items = parseItems(j);
         }
 
         setData({ ok: true, items });
@@ -80,20 +100,22 @@ export default function FolderClient(
   }, [listUrlSafe, listUrlByName, name, safe]);
 
   async function refresh() {
-    // просто триггерим эффект заново изменением t в url — useMemo уже включает Date.now()
     setLoading(true);
     setErr(null);
     try {
       const r = await fetch(listUrlSafe, { cache: "no-store" });
       const j: unknown = await r.json();
-      const items: Item[] =
-        isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+      const items = parseItems(j);
       setData({ ok: true, items });
     } catch (e) {
       setErr(String(e));
     } finally {
       setLoading(false);
     }
+  }
+
+  function isOkResp(u: unknown): u is { ok: boolean; error?: string } {
+    return isRec(u) && typeof u.ok === "boolean";
   }
 
   async function onDeletePhoto(item: Item) {
@@ -105,11 +127,12 @@ export default function FolderClient(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: item.key, url: item.url }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (j?.ok) {
+      const j: unknown = await r.json().catch(() => ({}));
+      if (isOkResp(j) && j.ok) {
         await refresh();
       } else {
-        alert(`Не удалось удалить фото: ${String(j?.error ?? r.statusText)}`);
+        const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
+        alert(`Не удалось удалить фото: ${msg}`);
       }
     } catch (e) {
       alert(String(e));
@@ -125,17 +148,19 @@ export default function FolderClient(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: item.key, caption }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (j?.ok) {
+      const j: unknown = await r.json().catch(() => ({}));
+      if (isOkResp(j) && j.ok) {
         await refresh();
       } else {
-        alert(`Не удалось сохранить подпись: ${String(j?.error ?? r.statusText)}`);
+        const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
+        alert(`Не удалось сохранить подпись: ${msg}`);
       }
     } catch (e) {
       alert(String(e));
     }
   }
 
+  // Лайтбокс
   const [preview, setPreview] = useState<Item | null>(null);
   const items: Item[] = (data && "items" in data && data.items) || [];
 
@@ -186,6 +211,7 @@ export default function FolderClient(
         </ul>
       )}
 
+      {/* Лайтбокс */}
       {preview && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
@@ -193,7 +219,11 @@ export default function FolderClient(
         >
           <div className="max-w-5xl w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview.url} alt={preview.caption ?? preview.key} className="w-full h-auto rounded-lg" />
+            <img
+              src={preview.url}
+              alt={preview.caption ?? preview.key}
+              className="w-full h-auto rounded-lg"
+            />
             {(preview.caption ?? "").trim() && (
               <div className="mt-2 text-white text-sm">{preview.caption}</div>
             )}
