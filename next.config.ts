@@ -1,16 +1,13 @@
-import type { NextConfig } from 'next';
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Включай по желанию
   reactStrictMode: true,
-
   images: {
-    // Разрешаем домены Vercel Blob (важно для <Image/>)
     remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**.public.blob.vercel-storage.com',
-      },
+      // Vercel Blob (если уже добавлено — оставьте)
+      { protocol: "https", hostname: "**.public.blob.vercel-storage.com" },
+      // Статическая обложка альбомов
+      { protocol: "https", hostname: "i.ibb.co" },
     ],
   },
 };
