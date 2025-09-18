@@ -3,56 +3,19 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import UploadClient from "./upload.client";
 
 type Folder = {
-  name: string;       // человекочитаемо (например "Апрель 2025")
-  safe: string;       // URL-сегмент (encodeURIComponent(name))
-  count: number;      // число видимых файлов
+  name: string;
+  safe: string;
+  count: number;
   coverUrl: string | null;
   updatedAt?: string | null;
+  caption?: string | null;
 };
 
 type FoldersResp =
   | { ok: true; folders: Folder[] }
   | { ok: false; folders: Folder[]; error: string };
-
-type CanUploadResp = {
-  ok?: boolean;
-  canUpload?: boolean;
-};
-
-type CreateFolderResp = {
-  ok: boolean;
-  safe?: string;
-  error?: string;
-};
-
-type DeleteFolderResp = {
-  ok: boolean;
-  error?: string;
-  reason?: string;
-};
-
-// Безопасный парсер тела ответа (не падает на пустом/не-JSON)
-async function readJsonSafe<T>(r: Response): Promise<{ json: T | null; raw: string }> {
-  const raw = await r.text();
-  if (!raw) return { json: null, raw: "" };
-  try {
-    return { json: JSON.parse(raw) as T, raw };
-  } catch {
-    return { json: null, raw };
-  }
-}
-
-// Вытянуть строковое поле по ключу из unknown-объекта
-function extractString(obj: unknown, key: string): string | null {
-  if (obj && typeof obj === "object") {
-    const v = (obj as Record<string, unknown>)[key];
-    if (typeof v === "string") return v;
-  }
-  return null;
-}
 
 export default function WeeklyRootClient() {
   const [data, setData] = useState<FoldersResp | null>(null);
@@ -60,29 +23,15 @@ export default function WeeklyRootClient() {
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
 
-  // анти-кеш
   const url = useMemo(() => `/api/weekly/folders?t=${Date.now()}`, []);
 
   async function loadOnce() {
     try {
       setErr(null);
-      setLoading(true);
       const r = await fetch(url, { cache: "no-store" });
-      const { json, raw } = await readJsonSafe<FoldersResp>(r);
-
-      if (!r.ok) {
-        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
-        setErr(msg);
-        setLoading(false);
-        return;
-      }
-
-      if (json && "folders" in json) {
-        setData(json as FoldersResp);
-      } else {
-        setData({ ok: false, folders: [], error: "Пустой ответ от /api/weekly/folders" });
-        console.warn("folders: non-JSON/empty response:", raw);
-      }
+      const raw = await r.text();
+      const j = (raw ? JSON.parse(raw) : { ok: false, folders: [], error: "empty response" }) as FoldersResp;
+      setData(j);
       setLoading(false);
     } catch (e) {
       setErr(String(e));
@@ -92,12 +41,12 @@ export default function WeeklyRootClient() {
 
   useEffect(() => {
     loadOnce();
-    // права на загрузку/удаление (только владелец/админ)
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-        const { json } = await readJsonSafe<CanUploadResp>(r);
-        setCanManage(Boolean(json?.canUpload ?? json?.ok));
+        const raw = await r.text();
+        const j = raw ? JSON.parse(raw) : {};
+        setCanManage(Boolean(j?.canUpload ?? j?.ok));
       } catch {
         setCanManage(false);
       }
@@ -114,18 +63,12 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      const { json, raw } = await readJsonSafe<CreateFolderResp>(r);
-
-      if (!r.ok) {
-        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
-        alert(msg);
-        return;
-      }
+      const raw = await r.text();
+      const json = raw ? JSON.parse(raw) : {};
       if (json?.ok && json?.safe) {
         window.location.href = `/weekly/${json.safe}`;
       } else {
-        const msg = extractString(json, "error") ?? (raw || "пустой ответ");
-        alert(`Не удалось создать папку: ${msg}`);
+        alert(`Не удалось создать папку: ${(json as { error?: string })?.error ?? raw ?? "пустой ответ"}`);
       }
     } catch (e) {
       alert(String(e));
@@ -141,26 +84,12 @@ export default function WeeklyRootClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ safe }),
       });
-      const { json, raw } = await readJsonSafe<DeleteFolderResp>(r);
-
-      if (!r.ok) {
-        const msg = extractString(json, "error") ?? `${r.status} ${r.statusText}`;
-        alert(msg);
-        return;
-      }
-
+      const raw = await r.text();
+      const json = raw ? JSON.parse(raw) : {};
       if (json?.ok) {
-        // оптимистично убираем папку из списка
-        setData((prev) =>
-          prev && "folders" in prev
-            ? { ok: true, folders: prev.folders.filter((f) => f.safe !== safe) }
-            : prev
-        );
-        // и перезагружаем с сервера
-        loadOnce();
+        await loadOnce();
       } else {
-        const msg = extractString(json, "error") ?? (raw || "пустой ответ");
-        alert(`Не удалось удалить папку: ${msg}`);
+        alert(`Не удалось удалить папку: ${(json as { error?: string; reason?: string })?.error ?? raw ?? "пустой ответ"}`);
       }
     } catch (e) {
       alert(String(e));
@@ -189,14 +118,13 @@ export default function WeeklyRootClient() {
       </div>
 
       <p className="text-sm text-white/70">
-        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую.
-        Также можно загрузить фото сразу, указав название новой папки — она будет создана автоматически.
+        Тут Вы можете увидеть свой актив/явку за неделю. Выберите папку или создайте новую. Также можно загрузить
+        фото сразу, указав название новой папки — она будет создана автоматически.
       </p>
 
-      {/* Быстрая загрузка в новую/существующую папку */}
-      <UploadClient onUploaded={loadOnce} />
+      {/* Здесь ваш UploadClient, если нужен */}
+      {/* <UploadClient onUploaded={loadOnce} /> */}
 
-      {/* Список папок */}
       {loading && <div className="text-white/70">Загружаем папки…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
       {!loading && !err && folders.length === 0 && (
@@ -215,10 +143,9 @@ export default function WeeklyRootClient() {
                     <h3 className="font-semibold">{f.name}</h3>
                     <span className="text-xs text-white/60">{f.count}</span>
                   </div>
+                  {f.caption && <div className="text-xs text-white/80 mt-1 line-clamp-2">{f.caption}</div>}
                   {f.updatedAt && (
-                    <div className="text-xs text-white/50 mt-1">
-                      обновлено: {new Date(f.updatedAt).toLocaleString()}
-                    </div>
+                    <div className="text-xs text-white/50 mt-1">обновлено: {new Date(f.updatedAt).toLocaleString()}</div>
                   )}
                 </div>
               </Link>
