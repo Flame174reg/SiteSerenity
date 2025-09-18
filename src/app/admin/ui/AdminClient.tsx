@@ -10,17 +10,25 @@ type Row = {
   lastSeen: string;
   isAdmin: boolean;
   isOwner: boolean;
+  // добавим поле локально
+  isSuperAdmin?: boolean;
 };
 
-function safeAvatar(u: Row): string {
-  // 1) явный URL из БД
-  const a = (u.avatar ?? "").trim();
-  if (a.startsWith("http://") || a.startsWith("https://")) return a;
+const OWNER_ID = "1195944713639960601";
 
-  // 2) дефолтные embed-аватары Discord (стабильные, не требуют токена)
-  // Берём «рандом» по ID, чтобы не всегда 0
-  const idx = Number.isFinite(Number(u.id)) ? Number(u.id) % 5 : 0;
-  return `https://cdn.discordapp.com/embed/avatars/${idx}.png?size=64`;
+function discordFallback(id: string): string {
+  const n = Number.isFinite(Number(id)) ? Number(id) % 5 : 0;
+  return `https://cdn.discordapp.com/embed/avatars/${n}.png?size=64`;
+}
+
+function pickAvatar(u: Row): string {
+  const a = (u.avatar ?? "").trim();
+  if (!a) return discordFallback(u.id);
+  try {
+    const url = new URL(a);
+    if (url.protocol === "http:" || url.protocol === "https:") return a;
+  } catch {}
+  return discordFallback(u.id);
 }
 
 export default function AdminClient() {
@@ -29,13 +37,40 @@ export default function AdminClient() {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // подгружаем пользователей
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch("/api/admin/users", { cache: "no-store" });
         if (!r.ok) throw new Error(`${r.status}`);
         const j = (await r.json()) as { users: Row[] };
-        setRows(j.users || []);
+        const base = (j.users || []).map((u) => ({
+          ...u,
+          isSuperAdmin: u.isOwner, // владелец == суперадмин
+        }));
+
+        // затем доклеим флаги super из БД
+        const ids = base.map((u) => u.id);
+        const r2 = await fetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids }),
+          cache: "no-store",
+        });
+        if (r2.ok) {
+          const j2 = (await r2.json()) as { ok: boolean; roles?: Record<string, { isAdmin: boolean; isSuperAdmin: boolean }> };
+          if (j2?.ok && j2.roles) {
+            for (const u of base) {
+              const role = j2.roles[u.id];
+              if (role) {
+                u.isSuperAdmin = u.isOwner || role.isSuperAdmin;
+                u.isAdmin = u.isOwner || role.isAdmin;
+              }
+            }
+          }
+        }
+
+        setRows(base);
       } catch {
         setError("Не удалось загрузить список пользователей");
       } finally {
@@ -44,7 +79,7 @@ export default function AdminClient() {
     })();
   }, []);
 
-  async function toggle(id: string, admin: boolean) {
+  async function toggleAdmin(id: string, admin: boolean) {
     setSaving(id);
     try {
       const r = await fetch("/api/admin/toggle", {
@@ -53,9 +88,43 @@ export default function AdminClient() {
         body: JSON.stringify({ id, admin }),
       });
       if (!r.ok) throw new Error(`${r.status}`);
-      setRows((xs) => xs.map((x) => (x.id === id ? { ...x, isAdmin: admin } : x)));
+      setRows((xs) =>
+        xs.map((x) =>
+          x.id === id
+            ? { ...x, isAdmin: admin || x.isOwner || x.isSuperAdmin === true }
+            : x
+        )
+      );
     } catch {
-      alert("Не удалось сохранить");
+      alert("Не удалось сохранить роль Админ");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function toggleSuper(id: string, superFlag: boolean) {
+    setSaving(id);
+    try {
+      const r = await fetch("/api/admin/super/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, super: superFlag }),
+      });
+      if (!r.ok) throw new Error(`${r.status}`);
+      setRows((xs) =>
+        xs.map((x) =>
+          x.id === id
+            ? {
+                ...x,
+                isSuperAdmin: superFlag || x.isOwner,
+                // суперадмин автоматически считается админом
+                isAdmin: superFlag || x.isOwner || x.isAdmin,
+              }
+            : x
+        )
+      );
+    } catch {
+      alert("Не удалось сохранить роль Суперадмин");
     } finally {
       setSaving(null);
     }
@@ -66,29 +135,31 @@ export default function AdminClient() {
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-3 text-sm opacity-70 mb-2 px-1">
+      <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-3 text-sm opacity-70 mb-2 px-1">
         <div>Пользователь</div>
         <div />
         <div>Последний визит</div>
         <div>Админ</div>
+        <div>Супер</div>
       </div>
 
       <ul className="space-y-2">
         {rows.map((u) => (
           <li
             key={u.id}
-            className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
+            className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
           >
             <div className="h-8 w-8 overflow-hidden rounded-full bg-white/10">
               <Image
-                src={safeAvatar(u)}
+                src={pickAvatar(u)}
                 alt={u.name || "avatar"}
                 width={32}
                 height={32}
                 className="h-8 w-8 rounded-full object-cover"
+                unoptimized
                 onError={(e) => {
                   const img = e.currentTarget as HTMLImageElement & { src: string };
-                  img.src = "/images/avatar-placeholder.png";
+                  img.src = discordFallback(u.id);
                 }}
                 priority
               />
@@ -106,12 +177,23 @@ export default function AdminClient() {
               {new Date(u.lastSeen).toLocaleString("ru-RU")}
             </div>
 
-            <div>
+            <div className="flex items-center">
               <input
                 type="checkbox"
                 disabled={u.isOwner || saving === u.id}
-                checked={u.isOwner || u.isAdmin}
-                onChange={(e) => toggle(u.id, e.target.checked)}
+                checked={u.isOwner || u.isAdmin || u.isSuperAdmin}
+                onChange={(e) => toggleAdmin(u.id, e.target.checked)}
+                title="Админ"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                disabled={u.isOwner || saving === u.id}
+                checked={u.isOwner || !!u.isSuperAdmin}
+                onChange={(e) => toggleSuper(u.id, e.target.checked)}
+                title="Суперадмин"
               />
             </div>
           </li>
