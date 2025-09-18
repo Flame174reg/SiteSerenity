@@ -37,9 +37,8 @@ function normalizeItem(v: unknown): Item {
 
 function parseItems(resp: unknown): Item[] {
   if (!isRec(resp)) return [];
-  const val = resp.items;
+  const val = (resp as { items?: unknown }).items;
   if (!Array.isArray(val)) return [];
-  // Нормализуем и отбрасываем заведомо битые записи без ключевых полей
   return val.map(normalizeItem).filter((it) => it.url !== "" && it.key !== "");
 }
 
@@ -51,12 +50,10 @@ export default function FolderClient(
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
 
-  // основной запрос по safe
   const listUrlSafe = useMemo(
     () => `/api/weekly/list?safe=${encodeURIComponent(safe)}&t=${Date.now()}`,
     [safe]
   );
-  // фолбэк по человекочитаемому имени
   const listUrlByName = useMemo(
     () => `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`,
     [name]
@@ -67,12 +64,12 @@ export default function FolderClient(
       setLoading(true);
       setErr(null);
       try {
-        // 1) пробуем по safe
+        // сначала по safe
         let r = await fetch(listUrlSafe, { cache: "no-store" });
         let j: unknown = await r.json();
         let items = parseItems(j);
 
-        // 2) если пусто — пробуем по name (на случай иной реализации бэка)
+        // фолбэк по name
         if (items.length === 0 && name && name !== safe) {
           r = await fetch(listUrlByName, { cache: "no-store" });
           j = await r.json();
@@ -92,7 +89,7 @@ export default function FolderClient(
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
         const j: unknown = await r.json();
         const jr = isRec(j) ? j : {};
-        setCanManage(Boolean(jr.canUpload ?? jr.ok));
+        setCanManage(Boolean((jr as { canUpload?: unknown; ok?: unknown }).canUpload ?? (jr as { ok?: unknown }).ok));
       } catch {
         setCanManage(false);
       }
@@ -115,7 +112,7 @@ export default function FolderClient(
   }
 
   function isOkResp(u: unknown): u is { ok: boolean; error?: string } {
-    return isRec(u) && typeof u.ok === "boolean";
+    return isRec(u) && typeof (u as { ok?: unknown }).ok === "boolean";
   }
 
   async function onDeletePhoto(item: Item) {
@@ -131,7 +128,9 @@ export default function FolderClient(
       if (isOkResp(j) && j.ok) {
         await refresh();
       } else {
-        const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
+        const msg = isRec(j) && typeof (j as { error?: unknown }).error === "string"
+          ? (j as { error: string }).error
+          : r.statusText;
         alert(`Не удалось удалить фото: ${msg}`);
       }
     } catch (e) {
@@ -146,13 +145,15 @@ export default function FolderClient(
       const r = await fetch("/api/weekly/caption", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: item.key, caption }),
+        body: JSON.stringify({ key: item.key, url: item.url, caption }),
       });
       const j: unknown = await r.json().catch(() => ({}));
       if (isOkResp(j) && j.ok) {
         await refresh();
       } else {
-        const msg = isRec(j) && typeof j.error === "string" ? j.error : r.statusText;
+        const msg = isRec(j) && typeof (j as { error?: unknown }).error === "string"
+          ? (j as { error: string }).error
+          : r.statusText;
         alert(`Не удалось сохранить подпись: ${msg}`);
       }
     } catch (e) {
@@ -189,7 +190,7 @@ export default function FolderClient(
               </div>
 
               {canManage && (
-                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                <div className="absolute top-2 right-2 flex gap-2">
                   <button
                     onClick={() => onEditCaption(it)}
                     className="rounded-md bg-white/80 hover:bg-white text-black text-xs px-2 py-1"
