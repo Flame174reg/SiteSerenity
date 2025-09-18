@@ -6,11 +6,22 @@ import Image from "next/image";
 type Row = {
   id: string;
   name?: string;
-  avatar?: string;
+  avatar?: string | null;
   lastSeen: string;
   isAdmin: boolean;
   isOwner: boolean;
 };
+
+function safeAvatar(u: Row): string {
+  // 1) явный URL из БД
+  const a = (u.avatar ?? "").trim();
+  if (a.startsWith("http://") || a.startsWith("https://")) return a;
+
+  // 2) дефолтные embed-аватары Discord (стабильные, не требуют токена)
+  // Берём «рандом» по ID, чтобы не всегда 0
+  const idx = Number.isFinite(Number(u.id)) ? Number(u.id) % 5 : 0;
+  return `https://cdn.discordapp.com/embed/avatars/${idx}.png?size=64`;
+}
 
 export default function AdminClient() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -53,43 +64,48 @@ export default function AdminClient() {
   if (loading) return <div className="opacity-70">Загрузка…</div>;
   if (error) return <div className="text-red-400">{error}</div>;
 
-  const avatarSrc = (u: Row) =>
-    u.avatar && u.avatar.trim().length > 0
-      ? u.avatar
-      : "/images/avatar-placeholder.png";
-
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <div className="mb-2 grid grid-cols-[auto_1fr_auto_auto] gap-3 px-1 text-sm opacity-70">
+      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-3 text-sm opacity-70 mb-2 px-1">
         <div>Пользователь</div>
-        <div></div>
+        <div />
         <div>Последний визит</div>
         <div>Админ</div>
       </div>
+
       <ul className="space-y-2">
         {rows.map((u) => (
           <li
             key={u.id}
             className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
           >
-            <Image
-              src={avatarSrc(u)}
-              alt={u.name ?? "avatar"}
-              width={32}
-              height={32}
-              className="h-8 w-8 rounded-full object-cover"
-              priority
-            />
+            <div className="h-8 w-8 overflow-hidden rounded-full bg-white/10">
+              <Image
+                src={safeAvatar(u)}
+                alt={u.name || "avatar"}
+                width={32}
+                height={32}
+                className="h-8 w-8 rounded-full object-cover"
+                onError={(e) => {
+                  const img = e.currentTarget as HTMLImageElement & { src: string };
+                  img.src = "/images/avatar-placeholder.png";
+                }}
+                priority
+              />
+            </div>
+
             <div className="min-w-0">
               <div className="truncate">{u.name || "Без имени"}</div>
-              <div className="truncate text-xs opacity-60">
+              <div className="text-xs opacity-60 truncate">
                 ID: {u.id}
                 {u.isOwner ? " (владелец)" : ""}
               </div>
             </div>
+
             <div className="text-xs opacity-70">
               {new Date(u.lastSeen).toLocaleString("ru-RU")}
             </div>
+
             <div>
               <input
                 type="checkbox"
@@ -101,7 +117,8 @@ export default function AdminClient() {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs opacity-60">
+
+      <p className="text-xs opacity-60 mt-3">
         Список формируется из тех, кто авторизовался хотя бы один раз.
       </p>
     </div>
