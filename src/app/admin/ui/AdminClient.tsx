@@ -111,7 +111,11 @@ export default function AdminClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, super: superFlag }),
       });
-      if (!r.ok) throw new Error(`${r.status}`);
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!r.ok || !j?.ok) {
+        const msg = j?.error || r.statusText || "unknown error";
+        throw new Error(msg);
+      }
       setRows((xs) =>
         xs.map((x) =>
           x.id === id
@@ -123,8 +127,8 @@ export default function AdminClient() {
             : x
         )
       );
-    } catch {
-      alert("Не удалось сохранить роль Суперадмин");
+    } catch (e) {
+      alert(`Не удалось сохранить роль Суперадмин: ${String(e instanceof Error ? e.message : e)}`);
     } finally {
       setSaving(null);
     }
