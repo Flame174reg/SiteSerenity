@@ -1,99 +1,97 @@
-// src/app/api/weekly/folder/delete/route.ts
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { sql } from "@vercel/postgres";
-import { list, del } from "@vercel/blob";
+import { NextRequest, NextResponse } from 'next/server';
+import { list, del } from '@vercel/blob';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+// Укажем runtime — blob SDK корректно работает в nodejs среде
+export const runtime = 'nodejs';
 
-const OWNER_ID = "1195944713639960601";
+// Опционально можно сделать эндпоинт "динамическим", чтобы не кешировался
+export const dynamic = 'force-dynamic';
 
-async function isAdminOrOwner(userId: string): Promise<boolean> {
-  if (userId === OWNER_ID) return true;
+type DeleteRequest = {
+  prefix?: string;
+  token?: string;
+};
+
+/**
+ * Универсальный хелпер — забираем токен из body / заголовка / ENV.
+ */
+function resolveToken(reqToken?: string): string | undefined {
+  // 1) Явно переданный
+  if (reqToken && reqToken.trim()) return reqToken.trim();
+  // 2) Из переменных окружения (если используешь server-side токен)
+  if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN;
+  return undefined;
+}
+
+/**
+ * Основная логика удаления: батчевый листинг по курсору, удаляем пачками.
+ */
+async function deleteByPrefix(prefix: string, token?: string) {
+  let deleted = 0;
+  let cursor: string | undefined = undefined;
+
+  for (;;) {
+    const res: Awaited<ReturnType<typeof list>> = await list({
+      prefix,
+      limit: 1000,
+      cursor,
+      token,
+    });
+
+    if (res.blobs.length) {
+      await Promise.all(res.blobs.map((b) => del(b.url, { token })));
+      deleted += res.blobs.length;
+    }
+
+    const nextCursor: string | undefined = res.cursor as string | undefined;
+    if (!nextCursor) break;
+    cursor = nextCursor;
+  }
+
+  return deleted;
+}
+
+/**
+ * Поддержим оба метода — POST и DELETE.
+ * Тело запроса: { prefix: string, token?: string }
+ * Токен можно также передать в заголовке Authorization: Bearer <token>
+ */
+export async function POST(req: NextRequest) {
   try {
-    const { rows } = await sql/* sql */`
-      SELECT role FROM uploaders WHERE discord_id = ${userId} LIMIT 1
-    `;
-    return rows.length > 0 && rows[0].role === "admin";
-  } catch {
-    return false;
+    const body = (await req.json().catch(() => ({}))) as DeleteRequest;
+    const prefix = body.prefix?.trim();
+    const headerAuth = req.headers.get('authorization');
+    const headerToken = headerAuth?.toLowerCase().startsWith('bearer ')
+      ? headerAuth.slice(7).trim()
+      : undefined;
+
+    if (!prefix) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing "prefix" in request body.' },
+        { status: 400 },
+      );
+    }
+
+    const token = resolveToken(body.token ?? headerToken);
+    if (!token) {
+      // Если работаешь с приватным бакетом, токен обязателен
+      return NextResponse.json(
+        { ok: false, error: 'Blob token is required (body.token / Authorization / ENV).' },
+        { status: 400 },
+      );
+    }
+
+    const deleted = await deleteByPrefix(prefix, token);
+    return NextResponse.json({ ok: true, deleted });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: err?.message ?? 'Unknown error' },
+      { status: 500 },
+    );
   }
 }
 
-// Тип ответа list()
-type ListResponse = Awaited<ReturnType<typeof list>>;
-
-export async function POST(req: Request) {
-  try {
-    const session = await auth();
-    const me = session?.user?.id;
-    if (!me) {
-      return NextResponse.json({ ok: false, error: "unauthenticated" }, { status: 401 });
-    }
-    if (!(await isAdminOrOwner(me))) {
-      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
-    }
-
-    const body = (await req.json().catch(() => null)) as { safe?: string } | null;
-    const safe = (body?.safe ?? "").trim();
-    if (!safe) {
-      return NextResponse.json({ ok: false, error: "safe is required" }, { status: 400 });
-    }
-
-    const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_TOKEN || undefined;
-
-    const prefix = `weekly/${safe}/`;
-    let deleted = 0;
-    let cursor: string | undefined = undefined;
-
-    // постраничное удаление по cursor
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const res: ListResponse = await list({ prefix, limit: 1000, cursor, token });
-
-      if (res.blobs.length) {
-        await Promise.all(res.blobs.map((b) => del(b.url, { token })));
-        deleted += res.blobs.length;
-      }
-
-      const newCursor = res.cursor;
-      if (!newCursor) break;
-      cursor = newCursor;
-    }
-
-    // чистим подписи к фото в этой папке
-    try {
-      await sql/* sql */`
-        DELETE FROM weekly_photos
-        WHERE key LIKE ${prefix + "%"}
-      `;
-    } catch {
-      // таблицы может не быть — ок
-    }
-
-    // чистим подпись самого альбома
-    try {
-      await sql/* sql */`
-        DELETE FROM weekly_albums WHERE safe = ${safe}
-      `;
-    } catch {
-      // таблицы может не быть — ок
-    }
-
-    return NextResponse.json({ ok: true, safe, deleted });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
-  }
-}
-
-export async function DELETE(req: Request) {
+export async function DELETE(req: NextRequest) {
+  // Просто прокидываем в POST, чтобы не дублировать код
   return POST(req);
-}
-
-export function OPTIONS() {
-  return new Response(null, { status: 204 });
-}
-export function HEAD() {
-  return new Response(null, { status: 200 });
 }
