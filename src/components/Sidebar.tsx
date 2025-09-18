@@ -14,20 +14,16 @@ export default function Sidebar() {
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const { data: session } = useSession();
 
-  // Только владелец видит ссылку на админку
   const meId =
-    // пробуем прямой id, затем e-mail как фолбэк
     (session?.user as { id?: string; email?: string } | undefined)?.id ||
     (session?.user as { email?: string } | undefined)?.email ||
     null;
   const isOwner = meId === OWNER_ID;
 
-  // Закрывать меню при смене маршрута
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  // Блокируем прокрутку
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "";
     if (open) closeBtnRef.current?.focus();
@@ -36,7 +32,6 @@ export default function Sidebar() {
     };
   }, [open]);
 
-  // Закрытие по Esc
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -64,10 +59,11 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* плавающая кнопка-бургер */}
+      {/* кнопка-бургер */}
       <button
         onClick={() => setOpen(true)}
         className="fixed left-3 top-20 z-40 rounded-lg border border-white/10 bg-black/50 px-3 py-2 text-sm backdrop-blur hover:bg-white/10"
+        aria-label="Открыть меню"
       >
         ☰
       </button>
@@ -109,9 +105,10 @@ export default function Sidebar() {
           <Item href="/">Главная</Item>
 
           <div className="px-3 pt-3 text-xs uppercase opacity-60">Памятки</div>
-          <Item href="/memo/rosgv">Памятки госника</Item>
-          <Item href="/memo/interview">Памятка по допросам</Item>
-          <Item href="/memo/psy">Памятка против душки</Item>
+          {/* правильные пути из репозитория */}
+          <Item href="/memos/gov">Памятки госника</Item>
+          <Item href="/memos/interrogations">Памятка по допросам</Item>
+          <Item href="/memos/anti">Памятка против душки</Item>
 
           <div className="px-3 pt-3 text-xs uppercase opacity-60">Документы</div>
           <Item href="/contracts">Контракты</Item>
