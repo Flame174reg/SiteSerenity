@@ -34,11 +34,21 @@ export async function POST(req: Request) {
       return NextResponse.json<NotOk>({ ok: false, error: "unauthenticated" }, { status: 401 });
     }
 
-    const body = (await req.json().catch(() => null)) as unknown;
-    if (!isRec(body) || !Array.isArray((body as any).ids)) {
+    const bodyUnknown = await req.json().catch(() => null) as unknown;
+    if (!isRec(bodyUnknown)) {
+      return NextResponse.json<NotOk>({ ok: false, error: "invalid json" }, { status: 400 });
+    }
+
+    const idsUnknown = (bodyUnknown as { ids?: unknown }).ids;
+    if (!Array.isArray(idsUnknown)) {
       return NextResponse.json<NotOk>({ ok: false, error: "ids[] required" }, { status: 400 });
     }
-    const ids = (body as { ids: unknown[] }).ids.map(String);
+
+    // Нормализуем в массив строк
+    const ids: string[] = idsUnknown.map((v) => String(v)).filter((s) => s.trim().length > 0);
+    if (ids.length === 0) {
+      return NextResponse.json<Ok>({ ok: true, roles: {} });
+    }
 
     await ensureSchema();
 
@@ -46,17 +56,23 @@ export async function POST(req: Request) {
       SELECT discord_id, role FROM uploaders WHERE discord_id = ANY(${ids})
     `;
 
-    const map: RolesMap = {};
+    const roles: RolesMap = {};
+    // Сначала заполним дефолты
     for (const id of ids) {
-      const row = res.rows.find((r) => r.discord_id === id) as { discord_id: string; role?: string } | undefined;
-      const role = row?.role;
+      const isOwner = id === OWNER_ID;
+      roles[id] = { isAdmin: isOwner, isSuperAdmin: isOwner };
+    }
+    // Потом применим то, что есть в БД
+    for (const row of res.rows as Array<{ discord_id: string; role: string }>) {
+      const id = row.discord_id;
+      const role = row.role;
       const isOwner = id === OWNER_ID;
       const isSuperAdmin = isOwner || role === "superadmin";
       const isAdmin = isSuperAdmin || role === "admin";
-      map[id] = { isAdmin, isSuperAdmin };
+      roles[id] = { isAdmin, isSuperAdmin };
     }
 
-    return NextResponse.json<Ok>({ ok: true, roles: map });
+    return NextResponse.json<Ok>({ ok: true, roles });
   } catch (e) {
     return NextResponse.json<NotOk>({ ok: false, error: String(e) }, { status: 500 });
   }
