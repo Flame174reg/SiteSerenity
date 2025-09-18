@@ -23,7 +23,7 @@ function truthy(v: unknown): boolean {
 }
 
 async function ensureSchema() {
-  // базовая таблица для ролей загрузчиков
+  // Базовая таблица
   await sql/* sql */`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
@@ -31,15 +31,18 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  // на случай старой схемы
+  // Догоняем старую схему: добавляем недостающие столбцы
   await sql/* sql */`
     ALTER TABLE uploaders
     ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
   `;
+  await sql/* sql */`
+    ALTER TABLE uploaders
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
+  `;
 }
 
 async function getMeId(req: NextRequest): Promise<string | null> {
-  // 1) пробуем next-auth напрямую
   try {
     const session = await auth();
     const id =
@@ -48,11 +51,8 @@ async function getMeId(req: NextRequest): Promise<string | null> {
       (session as { sub?: string } | null | undefined)?.sub ??
       null;
     if (id) return id;
-  } catch {
-    // игнорируем, попробуем дальше
-  }
+  } catch {}
 
-  // 2) через /api/auth/session с куками запроса
   try {
     const r = await fetch(`${req.nextUrl.origin}/api/auth/session`, {
       headers: { cookie: req.headers.get("cookie") ?? "" },
@@ -69,11 +69,8 @@ async function getMeId(req: NextRequest): Promise<string | null> {
         if (id) return id;
       }
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
 
-  // 3) фолбэки из заголовков/коков (если прокидывались с обратного прокси)
   return (
     req.headers.get("x-user-id") ||
     req.cookies.get("uid")?.value ||
@@ -107,14 +104,13 @@ export async function POST(req: NextRequest) {
 
     if (!id) return NextResponse.json<NotOk>({ ok: false, error: "id required" }, { status: 400 });
     if (id === OWNER_ID) {
-      // владелец всегда супер
       return NextResponse.json<Ok>({ ok: true, id, super: true, role: "superadmin" });
     }
 
     await ensureSchema();
 
     if (superFlag) {
-      // поднимаем до superadmin
+      // апгрейд до superadmin
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'superadmin', NOW())
@@ -123,7 +119,7 @@ export async function POST(req: NextRequest) {
       `;
       return NextResponse.json<Ok>({ ok: true, id, super: true, role: "superadmin" });
     } else {
-      // понижаем до admin (не лишаем полностью доступа загрузчика)
+      // понижение до admin
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'admin', NOW())
