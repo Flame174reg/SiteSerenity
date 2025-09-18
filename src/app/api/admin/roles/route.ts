@@ -24,7 +24,10 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  await sql/* sql */`ALTER TABLE uploaders ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'`;
+  await sql/* sql */`
+    ALTER TABLE uploaders
+    ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
+  `;
 }
 
 export async function POST(req: Request) {
@@ -34,7 +37,7 @@ export async function POST(req: Request) {
       return NextResponse.json<NotOk>({ ok: false, error: "unauthenticated" }, { status: 401 });
     }
 
-    const bodyUnknown = await req.json().catch(() => null) as unknown;
+    const bodyUnknown = (await req.json().catch(() => null)) as unknown;
     if (!isRec(bodyUnknown)) {
       return NextResponse.json<NotOk>({ ok: false, error: "invalid json" }, { status: 400 });
     }
@@ -44,7 +47,7 @@ export async function POST(req: Request) {
       return NextResponse.json<NotOk>({ ok: false, error: "ids[] required" }, { status: 400 });
     }
 
-    // Нормализуем в массив строк
+    // нормализуем в массив строк
     const ids: string[] = idsUnknown.map((v) => String(v)).filter((s) => s.trim().length > 0);
     if (ids.length === 0) {
       return NextResponse.json<Ok>({ ok: true, roles: {} });
@@ -52,17 +55,20 @@ export async function POST(req: Request) {
 
     await ensureSchema();
 
+    // ВАЖНО: для массивов используем sql.array(...)
     const res = await sql/* sql */`
-      SELECT discord_id, role FROM uploaders WHERE discord_id = ANY(${ids})
+      SELECT discord_id, role
+      FROM uploaders
+      WHERE discord_id = ANY(${sql.array(ids, "text")})
     `;
 
     const roles: RolesMap = {};
-    // Сначала заполним дефолты
+    // дефолты
     for (const id of ids) {
       const isOwner = id === OWNER_ID;
       roles[id] = { isAdmin: isOwner, isSuperAdmin: isOwner };
     }
-    // Потом применим то, что есть в БД
+    // применяем найденные роли
     for (const row of res.rows as Array<{ discord_id: string; role: string }>) {
       const id = row.discord_id;
       const role = row.role;
