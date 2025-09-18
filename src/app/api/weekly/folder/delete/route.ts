@@ -21,9 +21,6 @@ async function isAdminOrOwner(userId: string): Promise<boolean> {
   }
 }
 
-// Тип ответа list() берём из самой функции, чтобы не гадать
-type ListResponse = Awaited<ReturnType<typeof list>>;
-
 export async function POST(req: Request) {
   try {
     const session = await auth();
@@ -47,49 +44,63 @@ export async function POST(req: Request) {
     let deleted = 0;
     let cursor: string | undefined = undefined;
 
-    // Проходим все страницы списка по cursor
+    // постраничное удаление по cursor
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const res: ListResponse = await list({
-        prefix,
-        limit: 1000,
-        cursor,
-        token,
-      });
-
+      const res = await list({ prefix, limit: 1000, cursor, token });
       if (res.blobs.length) {
         await Promise.all(res.blobs.map((b) => del(b.url, { token })));
         deleted += res.blobs.length;
       }
-
       const newCursor: string | undefined = res.cursor;
       if (!newCursor) break;
       cursor = newCursor;
     }
 
-    // Чистим подписи в БД (если таблица есть)
+    // чистим подписи к фото
     try {
+      await sql/* sql */`
+        CREATE TABLE IF NOT EXISTS weekly_photos (
+          key TEXT PRIMARY KEY,
+          caption TEXT,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
       await sql/* sql */`
         DELETE FROM weekly_photos
         WHERE key LIKE ${prefix + "%"}
       `;
     } catch {
-      // таблицы может не быть — это ок
+      // таблицы может не быть — игнор
+    }
+
+    // чистим метаданные альбома (подпись альбома)
+    try {
+      await sql/* sql */`
+        CREATE TABLE IF NOT EXISTS weekly_albums (
+          safe TEXT PRIMARY KEY,
+          name TEXT,
+          caption TEXT,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+      await sql/* sql */`
+        DELETE FROM weekly_albums WHERE safe = ${safe}
+      `;
+    } catch {
+      // игнор
     }
 
     return NextResponse.json({ ok: true, safe, deleted });
   } catch (e) {
-    // всегда JSON, чтобы клиентский парсер не падал
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
 }
 
-// Разрешим также DELETE тем же кодом
 export async function DELETE(req: Request) {
   return POST(req);
 }
 
-// Префлайт/служебные — чтобы не ловить 405 на OPTIONS/HEAD
 export function OPTIONS() {
   return new Response(null, { status: 204 });
 }
