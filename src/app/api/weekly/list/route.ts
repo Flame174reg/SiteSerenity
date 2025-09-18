@@ -28,6 +28,14 @@ type NotOk = { ok: false; error: string };
 function isRec(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
+function getStr(o: Record<string, unknown>, k: string): string | null {
+  const v = o[k];
+  return typeof v === "string" ? v : null;
+}
+function getNum(o: Record<string, unknown>, k: string): number | null {
+  const v = o[k];
+  return typeof v === "number" ? v : null;
+}
 
 function slugify(human: string): string {
   return human
@@ -48,30 +56,29 @@ function albumFromPathname(pathname: string): string | null {
   return m ? m[1] : null;
 }
 
-function normalizeItem(b: unknown): Item | null {
-  const r = isRec(b) ? b : {};
-  const url = typeof r.url === "string" ? r.url : "";
-  const pathname = typeof r.pathname === "string" ? r.pathname : (typeof r.key === "string" ? r.key : "");
-  const uploadedAt =
-    typeof r.uploadedAt === "string"
-      ? r.uploadedAt
-      : typeof r.uploadedAt === "number"
-      ? new Date(r.uploadedAt).toISOString()
-      : null;
-  const size =
-    typeof r.size === "number" ? r.size : r.size === null ? null : undefined;
+function normalizeItemFromBlob(blobLike: unknown): Item | null {
+  if (!isRec(blobLike)) return null;
+  const pathname = getStr(blobLike, "pathname") ?? getStr(blobLike, "key");
+  const url = getStr(blobLike, "url");
+  if (!pathname || !url) return null;
 
-  if (!url || !pathname) return null;
+  const uploadedAtStr = getStr(blobLike, "uploadedAt");
+  const uploadedAtNum = getNum(blobLike, "uploadedAt");
+  const uploadedAt =
+    uploadedAtStr ??
+    (uploadedAtNum !== null ? new Date(uploadedAtNum).toISOString() : null);
+
+  const size = getNum(blobLike, "size");
 
   const safe = albumFromPathname(pathname) ?? "";
   if (!safe) return null;
 
   return {
     url,
-    key: pathname, // используем pathname как уникальный ключ в Blob
+    key: pathname, // pathname в Blob уникален и стабилен
     category: safe,
     uploadedAt,
-    size,
+    size: size ?? undefined,
     caption: undefined,
   };
 }
@@ -83,7 +90,7 @@ async function listAlbumItems(prefix: string, token?: string): Promise<Item[]> {
   for (;;) {
     const res = await list({ prefix, limit: 1000, cursor, token });
     for (const b of res.blobs) {
-      const it = normalizeItem(b);
+      const it = normalizeItemFromBlob(b as unknown);
       if (it) items.push(it);
     }
     if (typeof res.cursor === "string" && res.cursor.length > 0) {
@@ -92,7 +99,7 @@ async function listAlbumItems(prefix: string, token?: string): Promise<Item[]> {
       break;
     }
   }
-  // сортируем по дате, новые сверху
+  // новые сверху
   items.sort((a, b) => {
     const ta = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
     const tb = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
@@ -102,31 +109,34 @@ async function listAlbumItems(prefix: string, token?: string): Promise<Item[]> {
 }
 
 async function listAlbums(token?: string): Promise<Album[]> {
-  const map = new Map<string, { count: number; updatedAt: string | null }>();
+  const statMap = new Map<string, { count: number; updatedAt: string | null }>();
   let cursor: string | undefined = undefined;
 
   for (;;) {
     const res = await list({ prefix: "weekly/", limit: 1000, cursor, token });
+
     for (const b of res.blobs) {
-      const pathname = typeof (b as any).pathname === "string" ? (b as any).pathname : (b as any).key;
-      if (!pathname || typeof pathname !== "string") continue;
+      const o = b as unknown as Record<string, unknown>;
+      const pathname = getStr(o, "pathname") ?? getStr(o, "key");
+      if (!pathname) continue;
+
       const safe = albumFromPathname(pathname);
       if (!safe) continue;
 
+      const uploadedAtStr = getStr(o, "uploadedAt");
+      const uploadedAtNum = getNum(o, "uploadedAt");
       const uploadedAt =
-        typeof (b as any).uploadedAt === "string"
-          ? (b as any).uploadedAt
-          : typeof (b as any).uploadedAt === "number"
-          ? new Date((b as any).uploadedAt).toISOString()
-          : null;
+        uploadedAtStr ??
+        (uploadedAtNum !== null ? new Date(uploadedAtNum).toISOString() : null);
 
-      const stat = map.get(safe) || { count: 0, updatedAt: null };
-      stat.count += 1;
-      if (!stat.updatedAt || (uploadedAt && Date.parse(uploadedAt) > Date.parse(stat.updatedAt))) {
-        stat.updatedAt = uploadedAt;
+      const prev = statMap.get(safe) || { count: 0, updatedAt: null };
+      prev.count += 1;
+      if (!prev.updatedAt || (uploadedAt && Date.parse(uploadedAt) > Date.parse(prev.updatedAt))) {
+        prev.updatedAt = uploadedAt;
       }
-      map.set(safe, stat);
+      statMap.set(safe, prev);
     }
+
     if (typeof res.cursor === "string" && res.cursor.length > 0) {
       cursor = res.cursor;
     } else {
@@ -134,42 +144,36 @@ async function listAlbums(token?: string): Promise<Album[]> {
     }
   }
 
-  // Пробуем подхватить «человекочитаемые» подписи из meta-хранилища
-  // _weekly_meta/<safe>.json => { name: string }
-  const albums: Album[] = [];
-  for (const [safe, stat] of map.entries()) {
+  // Подмешиваем метаданные (подпись) из _weekly_meta/<safe>.json, если есть
+  const out: Album[] = [];
+  for (const [safe, stat] of statMap.entries()) {
     let name = decodeURIComponent(safe);
     try {
-      const metaPrefix = `_weekly_meta/${safe}.json`;
-      const meta = await list({ prefix: metaPrefix, limit: 1, token });
+      const meta = await list({ prefix: `_weekly_meta/${safe}.json`, limit: 1, token });
       const blob = meta.blobs[0];
-      if (blob?.url) {
-        const r = await fetch(blob.url, { cache: "no-store" });
+      if (blob) {
+        const r = await fetch((blob as unknown as Record<string, unknown>).url as string, {
+          cache: "no-store",
+        });
         const j = (await r.json().catch(() => null)) as unknown;
         if (isRec(j) && typeof j.name === "string" && j.name.trim()) {
           name = j.name.trim();
         }
       }
     } catch {
-      // meta опционален — проглатываем
+      // метаданные опциональны
     }
 
-    albums.push({
-      safe,
-      name,
-      updatedAt: stat.updatedAt,
-      count: stat.count,
-    });
+    out.push({ safe, name, updatedAt: stat.updatedAt, count: stat.count });
   }
 
-  // Сортируем новые альбомы вверх
-  albums.sort((a, b) => {
+  out.sort((a, b) => {
     const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
     const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
     return tb - ta;
   });
 
-  return albums;
+  return out;
 }
 
 export async function GET(req: NextRequest) {
@@ -177,10 +181,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const token = readToken();
 
-    const safeParam = searchParams.get("safe")?.trim() || "";
-    const categoryParam = searchParams.get("category")?.trim() || "";
+    const safeParam = (searchParams.get("safe") || "").trim();
+    const categoryParam = (searchParams.get("category") || "").trim();
 
-    // Режим элементов одного альбома:
+    // режим элементов одного альбома
     if (safeParam || categoryParam) {
       const safe = safeParam || slugify(categoryParam);
       if (!safe) {
@@ -190,7 +194,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json<OkItems>({ ok: true, items });
     }
 
-    // Режим списка альбомов:
+    // режим списка альбомов
     const categories = await listAlbums(token);
     return NextResponse.json<OkCategories>({ ok: true, categories });
   } catch (err: unknown) {
