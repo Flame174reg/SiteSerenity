@@ -16,55 +16,79 @@ type ListResp =
   | { ok: true; items: Item[] }
   | { ok: false; items: Item[]; error: string };
 
-export default function FolderClient(
-  { safe: _safe, name }: { safe: string; name: string }
-) {
-  // Помечаем как «использованный», чтобы ESLint не ругался:
-  void _safe;
+function isRec(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
 
+export default function FolderClient(
+  { safe, name }: { safe: string; name: string }
+) {
   const [data, setData] = useState<ListResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
 
-  // Можно обойтись и без таймстемпа (cache: "no-store" уже хватает),
-  // но оставляю как у тебя.
-  const listUrl = useMemo(
-    () =>
-      `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`,
+  // 1) основной путь: спрашиваем БЭК по safe
+  const listUrlSafe = useMemo(
+    () => `/api/weekly/list?safe=${encodeURIComponent(safe)}&t=${Date.now()}`,
+    [safe]
+  );
+
+  // 2) запасной: попробовать по человекочитаемому имени (если вдруг API ждёт его)
+  const listUrlByName = useMemo(
+    () => `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`,
     [name]
   );
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
+      setErr(null);
       try {
-        const r = await fetch(listUrl, { cache: "no-store" });
-        const j: ListResp = await r.json();
-        setData(j);
+        // сначала пытаемся по safe
+        let r = await fetch(listUrlSafe, { cache: "no-store" });
+        let j: unknown = await r.json();
+        let items: Item[] =
+          isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+
+        // если пусто — пробуем фолбэк по name
+        if (items.length === 0 && name && name !== safe) {
+          r = await fetch(listUrlByName, { cache: "no-store" });
+          j = await r.json();
+          items =
+            isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+        }
+
+        setData({ ok: true, items });
       } catch (e) {
         setErr(String(e));
       } finally {
         setLoading(false);
       }
     })();
+
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
-        const j = await r.json();
-        setCanManage(Boolean(j?.canUpload ?? j?.ok));
+        const j: unknown = await r.json();
+        const jr = isRec(j) ? j : {};
+        setCanManage(Boolean(jr.canUpload ?? jr.ok));
       } catch {
         setCanManage(false);
       }
     })();
-  }, [listUrl]);
+  }, [listUrlSafe, listUrlByName, name, safe]);
 
   async function refresh() {
+    // просто триггерим эффект заново изменением t в url — useMemo уже включает Date.now()
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch(listUrl, { cache: "no-store" });
-      const j: ListResp = await r.json();
-      setData(j);
+      const r = await fetch(listUrlSafe, { cache: "no-store" });
+      const j: unknown = await r.json();
+      const items: Item[] =
+        isRec(j) && Array.isArray((j as any).items) ? (j as any).items : [];
+      setData({ ok: true, items });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -112,9 +136,7 @@ export default function FolderClient(
     }
   }
 
-  // Лайтбокс
   const [preview, setPreview] = useState<Item | null>(null);
-
   const items: Item[] = (data && "items" in data && data.items) || [];
 
   return (
@@ -122,41 +144,37 @@ export default function FolderClient(
       <h2 className="text-xl font-semibold">{name}</h2>
       {loading && <div className="text-white/70">Загружаем изображения…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
-      {!loading && !err && items.length === 0 && (
-        <div className="text-white/70">В папке пока пусто.</div>
-      )}
+      {!loading && !err && items.length === 0 && <div className="text-white/70">В папке пока пусто.</div>}
 
       {!loading && !err && items.length > 0 && (
-        <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+        <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {items.map((it) => (
             <li key={it.key} className="group relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={it.url}
                 alt={it.caption ?? it.key}
-                className="h-40 w-full cursor-zoom-in rounded-lg object-cover"
+                className="w-full h-40 object-cover rounded-lg cursor-zoom-in"
                 onClick={() => setPreview(it)}
               />
               <div className="absolute bottom-2 left-2 right-2 text-xs text-white">
                 {(it.caption ?? "").trim() && (
-                  <span className="rounded bg-black/60 px-1.5 py-1">
-                    {it.caption}
-                  </span>
+                  <span className="px-1.5 py-1 bg-black/60 rounded">{it.caption}</span>
                 )}
               </div>
 
               {canManage && (
-                <div className="absolute right-2 top-2 flex gap-2 opacity-0 transition group-hover:opacity-100">
+                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
                   <button
                     onClick={() => onEditCaption(it)}
-                    className="rounded-md bg-white/80 px-2 py-1 text-xs text-black hover:bg-white"
+                    className="rounded-md bg-white/80 hover:bg-white text-black text-xs px-2 py-1"
                     title="Подпись"
                   >
                     Подпись
                   </button>
                   <button
                     onClick={() => onDeletePhoto(it)}
-                    className="rounded-md bg-red-500/80 px-2 py-1 text-xs text-white hover:bg-red-500"
+                    className="rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
                     title="Удалить"
                   >
                     Удалить
@@ -168,21 +186,16 @@ export default function FolderClient(
         </ul>
       )}
 
-      {/* Лайтбокс */}
       {preview && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setPreview(null)}
         >
-          <div className="w-full max-w-5xl">
+          <div className="max-w-5xl w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={preview.url}
-              alt={preview.caption ?? preview.key}
-              className="h-auto w-full rounded-lg"
-            />
+            <img src={preview.url} alt={preview.caption ?? preview.key} className="w-full h-auto rounded-lg" />
             {(preview.caption ?? "").trim() && (
-              <div className="mt-2 text-sm text-white">{preview.caption}</div>
+              <div className="mt-2 text-white text-sm">{preview.caption}</div>
             )}
           </div>
         </div>
