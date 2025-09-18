@@ -1,81 +1,39 @@
 // src/app/weekly/folder.client.tsx
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import UploadClient from "./upload.client";
+import { useEffect, useMemo, useState } from "react";
 
-type WeeklyItem = {
+type Item = {
   url: string;
   key: string;
   category: string;
+  uploadedAt: string | null;
+  size?: number | null;
   caption?: string | null;
-  uploadedAt?: string;
-  size?: number;
 };
 
-type WeeklyListResp =
-  | { ok: true; items: WeeklyItem[]; categories: string[] }
-  | { ok: false; items: WeeklyItem[]; categories: string[]; error: string };
+type ListResp = { ok: true; items: Item[] } | { ok: false; items: Item[]; error: string };
 
-export default function WeeklyFolderClient({
-  categorySafe,
-  categoryHuman,
-}: {
-  categorySafe: string;
-  categoryHuman: string;
-}) {
-  const [data, setData] = useState<WeeklyListResp | null>(null);
+export default function FolderClient({ safe, name }: { safe: string; name: string }) {
+  const [data, setData] = useState<ListResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
-  const retriesLeft = useRef(5);
 
-  const [lbIndex, setLbIndex] = useState<number | null>(null);
-  const [capDraft, setCapDraft] = useState("");
-
-  const queryUrl = useMemo(() => {
-    const ts = Date.now();
-    const sp = new URLSearchParams({ safe: categorySafe, t: String(ts) });
-    return `/api/weekly/list?${sp.toString()}`;
-  }, [categorySafe]);
-
-  function currentItem(): WeeklyItem | null {
-    if (!data || !("ok" in data) || !data.ok) return null;
-    if (lbIndex == null) return null;
-    return data.items[lbIndex] ?? null;
-  }
-
-  function setItems(mutator: (prev: WeeklyItem[]) => WeeklyItem[]) {
-    setData((prev) => {
-      if (!prev || !("ok" in prev) || !prev.ok) return prev;
-      return { ...prev, items: mutator(prev.items) };
-    });
-  }
-
-  async function loadOnce() {
-    try {
-      setErr(null);
-      const r = await fetch(queryUrl, { cache: "no-store" });
-      const j: WeeklyListResp = await r.json();
-      setData(j);
-      setLoading(false);
-
-      if (j.ok && j.items.length === 0 && retriesLeft.current > 0) {
-        retriesLeft.current -= 1;
-        setLoading(true);
-        setTimeout(loadOnce, 350);
-      }
-    } catch (e) {
-      setErr(String(e));
-      setLoading(false);
-    }
-  }
+  const listUrl = useMemo(() => `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`, [name]);
 
   useEffect(() => {
-    retriesLeft.current = 5;
-    setLoading(true);
-    loadOnce();
+    (async () => {
+      try {
+        const r = await fetch(listUrl, { cache: "no-store" });
+        const j: ListResp = await r.json();
+        setData(j);
+      } catch (e) {
+        setErr(String(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
     (async () => {
       try {
         const r = await fetch("/api/photo/can-upload", { cache: "no-store" });
@@ -85,224 +43,126 @@ export default function WeeklyFolderClient({
         setCanManage(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categorySafe]);
+  }, [listUrl]);
 
-  // ----- удаление -----
-  async function onDelete(key: string) {
-    if (!canManage) return;
-    if (!confirm("Удалить изображение безвозвратно?")) return;
+  async function refresh() {
+    setLoading(true);
+    setErr(null);
     try {
-      const r = await fetch("/api/weekly/delete", {
+      const r = await fetch(listUrl, { cache: "no-store" });
+      const j: ListResp = await r.json();
+      setData(j);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onDeletePhoto(item: Item) {
+    if (!canManage) return;
+    if (!confirm("Удалить это изображение?")) return;
+    try {
+      const r = await fetch("/api/weekly/photo/delete", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ key: item.key, url: item.url }),
       });
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
       if (j?.ok) {
-        setItems((prev) => prev.filter((it) => it.key !== key));
-        // если удаляли из модалки — корректно закрыть/перелистнуть
-        setLbIndex((idx) => {
-          if (idx == null) return idx;
-          const newLen = (data && "ok" in data && data.ok ? data.items.length - 1 : 0);
-          if (newLen <= 0) return null;
-          return Math.min(idx, newLen - 1);
-        });
+        await refresh();
       } else {
-        alert(`Не удалось удалить: ${j?.error ?? j?.reason ?? r.statusText}`);
+        alert(`Не удалось удалить фото: ${String(j?.error ?? r.statusText)}`);
       }
     } catch (e) {
       alert(String(e));
     }
   }
 
-  // ----- модалка -----
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (lbIndex == null) return;
-      if (e.key === "Escape") setLbIndex(null);
-      if (e.key === "ArrowLeft") setLbIndex((i) => (i == null ? i : Math.max(0, i - 1)));
-      if (e.key === "ArrowRight") {
-        setLbIndex((i) => {
-          if (i == null) return i;
-          const items = (data && "ok" in data && data.ok ? data.items : []);
-          return Math.min(items.length - 1, i + 1);
-        });
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lbIndex, data]);
-
-  useEffect(() => {
-    const it = currentItem();
-    setCapDraft(it?.caption ?? "");
-  }, [lbIndex]); // смена кадра — обновить драфт
-
-  async function saveCaption() {
-    const it = currentItem();
-    if (!it) return;
+  async function onEditCaption(item: Item) {
+    if (!canManage) return;
+    const caption = window.prompt("Подпись к фото", item.caption ?? "") ?? "";
     try {
       const r = await fetch("/api/weekly/caption", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: it.key, caption: capDraft }),
+        body: JSON.stringify({ key: item.key, caption }),
       });
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
       if (j?.ok) {
-        setItems((prev) =>
-          prev.map((x) => (x.key === it.key ? { ...x, caption: capDraft } : x)),
-        );
+        await refresh();
       } else {
-        alert(`Не удалось сохранить подпись: ${j?.error ?? j?.reason ?? r.statusText}`);
+        alert(`Не удалось сохранить подпись: ${String(j?.error ?? r.statusText)}`);
       }
     } catch (e) {
       alert(String(e));
     }
   }
 
-  const items = (data && "ok" in data && data.ok) ? data.items : [];
-  const foldersList = (data && data.categories) || [];
+  // Лайтбокс
+  const [preview, setPreview] = useState<Item | null>(null);
+
+  const items: Item[] = (data && "items" in data && data.items) || [];
 
   return (
     <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold">Недельный актив — {categoryHuman}</h1>
-        <Link href="/weekly" className="text-sm underline text-white/80 hover:text-white">
-          Все папки
-        </Link>
-      </div>
+      <h2 className="text-xl font-semibold">{name}</h2>
+      {loading && <div className="text-white/70">Загружаем изображения…</div>}
+      {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
+      {!loading && !err && items.length === 0 && <div className="text-white/70">В папке пока пусто.</div>}
 
-      <p className="text-sm text-white/70">
-        Тут вы можете увидеть свой актив/явку за неделю. Загрузка идёт в папку{" "}
-        <span className="font-medium">{categoryHuman}</span>.
-      </p>
-
-      <UploadClient
-        defaultCategory={categoryHuman}
-        categories={[categoryHuman, ...foldersList.filter((c) => c !== categoryHuman)]}
-        forcedCategorySafe={categorySafe}
-        onUploaded={loadOnce}
-      />
-
-      {loading && <div className="text-white/70">Загружаем…</div>}
-      {!loading && err && <div className="text-red-400">Ошибка загрузки списка: {err}</div>}
-      {!loading && !err && data && "ok" in data && !data.ok && (
-        <div className="text-red-400">Ошибка загрузки списка: {data.error}</div>
-      )}
-
-      {!loading && !err && data && "ok" in data && data.ok && (
-        items.length > 0 ? (
-          <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {items.map((it, idx) => (
-              <li
-                key={it.key}
-                className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/5"
-                title={it.caption ?? ""}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={it.url}
-                  alt={it.caption ?? ""}
-                  className="w-full h-64 object-cover cursor-zoom-in"
-                  loading="lazy"
-                  onClick={() => setLbIndex(idx)}
-                />
-
-                <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
-                  {it.caption ? (
-                    <p className="text-white text-sm drop-shadow">{it.caption}</p>
-                  ) : (
-                    <p className="text-white/60 text-xs">Без подписи</p>
-                  )}
-                </div>
-
-                {canManage && (
-                  <button
-                    onClick={() => onDelete(it.key)}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition
-                               rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
-                    title="Удалить изображение"
-                  >
-                    Удалить
-                  </button>
+      {!loading && !err && items.length > 0 && (
+        <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {items.map((it) => (
+            <li key={it.key} className="group relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={it.url}
+                alt={it.caption ?? it.key}
+                className="w-full h-40 object-cover rounded-lg cursor-zoom-in"
+                onClick={() => setPreview(it)}
+              />
+              <div className="absolute bottom-2 left-2 right-2 text-xs text-white">
+                {(it.caption ?? "").trim() && (
+                  <span className="px-1.5 py-1 bg-black/60 rounded">{it.caption}</span>
                 )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="text-white/70">В этой папке пока нет изображений.</div>
-        )
-      )}
+              </div>
 
-      {/* --- Модальный просмотрщик --- */}
-      {lbIndex != null && currentItem() && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
-          onClick={() => setLbIndex(null)}
-        >
-          <div className="relative max-w-[92vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={currentItem()!.url}
-              alt={currentItem()!.caption ?? ""}
-              className="max-w-[92vw] max-h-[80vh] object-contain rounded-lg"
-            />
-
-            {/* навигация */}
-            <div className="absolute inset-x-0 -bottom-14 flex items-center justify-between">
-              <button
-                onClick={() => setLbIndex((i) => (i == null ? i : Math.max(0, i - 1)))}
-                className="rounded-md bg-white/10 px-3 py-1 border border-white/20 hover:bg-white/15"
-              >
-                ← Предыдущее
-              </button>
-              <button
-                onClick={() =>
-                  setLbIndex((i) => {
-                    if (i == null) return i;
-                    return Math.min(items.length - 1, i + 1);
-                  })
-                }
-                className="rounded-md bg-white/10 px-3 py-1 border border-white/20 hover:bg-white/15"
-              >
-                Следующее →
-              </button>
-            </div>
-
-            {/* подпись + удалить */}
-            <div className="mt-4 flex items-center gap-2">
-              {canManage ? (
-                <>
-                  <input
-                    className="min-w-[40vw] rounded-md bg-white/10 border border-white/20 px-3 py-2 outline-none"
-                    placeholder="Подпись к изображению…"
-                    value={capDraft}
-                    onChange={(e) => setCapDraft(e.target.value)}
-                  />
+              {canManage && (
+                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
                   <button
-                    onClick={saveCaption}
-                    className="rounded-md bg-white/10 px-3 py-2 border border-white/20 hover:bg-white/15"
+                    onClick={() => onEditCaption(it)}
+                    className="rounded-md bg-white/80 hover:bg-white text-black text-xs px-2 py-1"
+                    title="Подпись"
                   >
-                    Сохранить
+                    Подпись
                   </button>
                   <button
-                    onClick={() => onDelete(currentItem()!.key)}
-                    className="rounded-md bg-red-500/80 hover:bg-red-500 px-3 py-2 text-white"
+                    onClick={() => onDeletePhoto(it)}
+                    className="rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
+                    title="Удалить"
                   >
                     Удалить
                   </button>
-                </>
-              ) : (
-                <div className="text-white/80">{currentItem()!.caption ?? "Без подписи"}</div>
+                </div>
               )}
-              <button
-                onClick={() => setLbIndex(null)}
-                className="ml-auto rounded-md bg-white/10 px-3 py-2 border border-white/20 hover:bg-white/15"
-              >
-                Закрыть
-              </button>
-            </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Лайтбокс */}
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreview(null)}
+        >
+          <div className="max-w-5xl w-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview.url} alt={preview.caption ?? preview.key} className="w-full h-auto rounded-lg" />
+            {(preview.caption ?? "").trim() && (
+              <div className="mt-2 text-white text-sm">{preview.caption}</div>
+            )}
           </div>
         </div>
       )}
