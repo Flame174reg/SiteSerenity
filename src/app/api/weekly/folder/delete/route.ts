@@ -21,6 +21,9 @@ async function isAdminOrOwner(userId: string): Promise<boolean> {
   }
 }
 
+// Тип ответа list()
+type ListResponse = Awaited<ReturnType<typeof list>>;
+
 export async function POST(req: Request) {
   try {
     const session = await auth();
@@ -47,48 +50,35 @@ export async function POST(req: Request) {
     // постраничное удаление по cursor
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const res = await list({ prefix, limit: 1000, cursor, token });
+      const res: ListResponse = await list({ prefix, limit: 1000, cursor, token });
+
       if (res.blobs.length) {
         await Promise.all(res.blobs.map((b) => del(b.url, { token })));
         deleted += res.blobs.length;
       }
-      const newCursor: string | undefined = res.cursor;
+
+      const newCursor = res.cursor;
       if (!newCursor) break;
       cursor = newCursor;
     }
 
-    // чистим подписи к фото
+    // чистим подписи к фото в этой папке
     try {
-      await sql/* sql */`
-        CREATE TABLE IF NOT EXISTS weekly_photos (
-          key TEXT PRIMARY KEY,
-          caption TEXT,
-          updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-      `;
       await sql/* sql */`
         DELETE FROM weekly_photos
         WHERE key LIKE ${prefix + "%"}
       `;
     } catch {
-      // таблицы может не быть — игнор
+      // таблицы может не быть — ок
     }
 
-    // чистим метаданные альбома (подпись альбома)
+    // чистим подпись самого альбома
     try {
-      await sql/* sql */`
-        CREATE TABLE IF NOT EXISTS weekly_albums (
-          safe TEXT PRIMARY KEY,
-          name TEXT,
-          caption TEXT,
-          updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-      `;
       await sql/* sql */`
         DELETE FROM weekly_albums WHERE safe = ${safe}
       `;
     } catch {
-      // игнор
+      // таблицы может не быть — ок
     }
 
     return NextResponse.json({ ok: true, safe, deleted });
