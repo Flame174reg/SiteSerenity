@@ -3,113 +3,105 @@ import { NextResponse } from "next/server";
 import { list } from "@vercel/blob";
 import { sql } from "@vercel/postgres";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Item = {
+type WeeklyItem = {
   url: string;
-  key: string;           // полный blob key: weekly/<safe>/<file>
-  category: string;      // человеко-читаемое имя папки
-  caption?: string | null;
-  uploadedAt?: string;
+  key: string;
+  category: string;      // safe
+  uploadedAt: string;    // ISO
   size?: number;
+  caption: string | null;
 };
-
-type Resp = { ok: boolean; items: Item[]; categories: string[] };
-
-// Тип для объекта из list(), без any/ban-types
-type BlobItem = {
-  pathname: string;
-  url: string;
-  uploadedAt?: Date | string;
-  [extra: string]: unknown; // допускаем доп. поля SDK
-};
-
-function hasNumberSize(x: unknown): x is { size: number } {
-  return typeof x === "object" && x !== null && typeof (x as { size?: unknown }).size === "number";
-}
-
-function toIso(d?: Date | string): string | undefined {
-  if (!d) return undefined;
-  if (d instanceof Date) return d.toISOString();
-  const t = Date.parse(d);
-  return Number.isNaN(t) ? undefined : new Date(t).toISOString();
-}
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const categoryHuman = url.searchParams.get("category"); // «Апрель 2025»
-    const categorySafeParam = url.searchParams.get("safe"); // «%D0%90%D0%BF...»
-    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const category = url.searchParams.get("category") || undefined; // safe
+    const prefix = category ? `weekly/${category}/` : "weekly/";
 
-    // Определяем safe-сегмент из safe или из human
-    const safe =
-      categorySafeParam && !categorySafeParam.includes("/")
-        ? categorySafeParam
-        : categoryHuman
-        ? encodeURIComponent(categoryHuman)
-        : null;
+    const res = await list({ prefix, limit: 1000 });
+    const items: WeeklyItem[] = [];
 
-    // Список всех категорий (для подсказок и корневой страницы)
-    const all = await list({ prefix: "weekly/", limit: 10_000, token });
-    const catsSet = new Set<string>();
-    for (const b of (all.blobs as unknown as BlobItem[])) {
-      const p = b.pathname.split("/");
-      if (p.length >= 2 && p[1]) catsSet.add(decodeURIComponent(p[1]));
-    }
-    const categories = Array.from(catsSet).sort((a, b) => a.localeCompare(b, "ru"));
+    for (const b of res.blobs) {
+      const parts = b.pathname.split("/");
+      if (parts.length < 3) continue; // защита
+      const safe = parts[1];
 
-    // Если запрошена конкретная папка — отдадим её содержимое
-    if (safe) {
-      const listed = await list({ prefix: `weekly/${safe}/`, limit: 10_000, token });
-      const blobs = listed.blobs as unknown as BlobItem[];
-
-      // прячем скрытые файлы (начинаются с точки)
-      const visible = blobs.filter((b) => !b.pathname.split("/").pop()!.startsWith("."));
-
-      const items: Item[] = visible.map((b) => ({
+      items.push({
         url: b.url,
         key: b.pathname,
-        category: decodeURIComponent(safe),
-        uploadedAt: toIso(b.uploadedAt),
-        size: hasNumberSize(b) ? b.size : undefined,
-      }));
-
-      // Подмешиваем подписи из БД (если таблицы ещё нет — создаём)
-      try {
-        await sql/*sql*/`
-          CREATE TABLE IF NOT EXISTS weekly_photos (
-            blob_key TEXT PRIMARY KEY,
-            caption  TEXT
-          );
-        `;
-        const like = `weekly/${safe}/%`;
-        const { rows } = await sql/*sql*/`
-          SELECT blob_key, caption
-          FROM weekly_photos
-          WHERE blob_key LIKE ${like};
-        `;
-        const caps = new Map<string, string | null>();
-        for (const r of rows) {
-          caps.set(String(r.blob_key), r.caption == null ? null : String(r.caption));
-        }
-        for (const it of items) {
-          it.caption = caps.get(it.key) ?? null;
-        }
-      } catch {
-        // ошибки БД не должны ломать выдачу картинок
-      }
-
-      return NextResponse.json({ ok: true, items, categories } satisfies Resp);
+        category: safe,
+        uploadedAt: b.uploadedAt ? new Date(b.uploadedAt).toISOString() : new Date().toISOString(),
+        size: typeof b.size === "number" ? b.size : undefined,
+        caption: null,
+      });
     }
 
-    // Корневая страница — только список папок
-    return NextResponse.json({ ok: true, items: [], categories } satisfies Resp);
+    // подмешиваем подписи к фото
+    try {
+      await sql/* sql */`
+        CREATE TABLE IF NOT EXISTS weekly_photos (
+          key TEXT PRIMARY KEY,
+          caption TEXT,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+      if (category) {
+        const like = `weekly/${category}/%`;
+        const { rows } = await sql/* sql */`
+          SELECT key, caption
+          FROM weekly_photos
+          WHERE key LIKE ${like}
+        `;
+        const m = new Map<string, string | null>();
+        for (const r of rows) m.set(String(r.key), (r.caption as string) ?? null);
+        for (const it of items) {
+          if (m.has(it.key)) it.caption = m.get(it.key) ?? null;
+        }
+      } else {
+        const { rows } = await sql/* sql */`SELECT key, caption FROM weekly_photos`;
+        const m = new Map<string, string | null>();
+        for (const r of rows) m.set(String(r.key), (r.caption as string) ?? null);
+        for (const it of items) {
+          if (m.has(it.key)) it.caption = m.get(it.key) ?? null;
+        }
+      }
+    } catch {
+      // нет БД — ок, без подписей
+    }
+
+    // подпись альбома (если конкретная категория)
+    let albumCaption: string | null = null;
+    if (category) {
+      try {
+        await sql/* sql */`
+          CREATE TABLE IF NOT EXISTS weekly_albums (
+            safe TEXT PRIMARY KEY,
+            name TEXT,
+            caption TEXT,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `;
+        const { rows } = await sql/* sql */`
+          SELECT caption FROM weekly_albums WHERE safe = ${category} LIMIT 1
+        `;
+        albumCaption = rows.length ? ((rows[0].caption as string) ?? null) : null;
+      } catch {
+        // нет таблицы — ок
+      }
+    }
+
+    return NextResponse.json({ ok: true, items, albumCaption });
   } catch (e) {
-    // Диагностический ответ без падения статуса
-    return NextResponse.json(
-      { ok: false, items: [], categories: [], error: String(e) } as Resp & { error: string },
-      { status: 200 },
-    );
+    return NextResponse.json({ ok: false, items: [], error: String(e) }, { status: 200 });
   }
+}
+
+export function HEAD() {
+  return new Response(null, { status: 200 });
+}
+export function OPTIONS() {
+  return new Response(null, { status: 204 });
 }
