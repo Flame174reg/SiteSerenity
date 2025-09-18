@@ -18,11 +18,9 @@ const COVER_URL = "https://i.ibb.co/TBZ5CXFW/logo.png";
 function isRec(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
-
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
 }
-
 function normalizeAlbum(a: unknown): Album {
   const r = isRec(a) ? a : {};
   const rawSafe =
@@ -30,19 +28,15 @@ function normalizeAlbum(a: unknown): Album {
     (typeof r.categorySafe === "string" && r.categorySafe) ||
     (typeof r.id === "string" && r.id) ||
     "";
-
   const safe = String(rawSafe);
-
   const rawName =
     (typeof r.name === "string" && r.name) ||
     (typeof r.categoryHuman === "string" && r.categoryHuman) ||
     decodeURIComponent(safe);
-
   const updatedAt =
     (typeof r.updatedAt === "string" && r.updatedAt) ||
     (typeof r.lastModified === "string" && r.lastModified) ||
     null;
-
   const rawCount =
     (typeof r.count === "number" && r.count) ||
     (typeof r.items === "number" && r.items) ||
@@ -56,16 +50,12 @@ function normalizeAlbum(a: unknown): Album {
     count: Number(rawCount),
   };
 }
-
-/** Достаём массив альбомов из произвольного ответа API, без any */
 function extractAlbumsFromResp(j: unknown): unknown[] {
   if (!isRec(j)) return [];
-  // самые распространённые ключи
   const fromCategories = asArray(j.categories);
   if (fromCategories.length) return fromCategories;
   const fromAlbums = asArray(j.albums);
   if (fromAlbums.length) return fromAlbums;
-  // иногда прилетает как { ok:false, categories:[...] } и т.п.
   return [];
 }
 
@@ -85,15 +75,13 @@ export default function WeeklyPage() {
       let j: unknown = await r.json();
       let raw = extractAlbumsFromResp(j);
 
-      // запасной роут (если бэк отдаёт иначе)
+      // запасной эндпоинт
       if (!Array.isArray(raw) || raw.length === 0) {
         try {
           r = await fetch("/api/weekly/categories", { cache: "no-store" });
-          j = (await r.json()) as unknown;
+          j = await r.json();
           raw = extractAlbumsFromResp(j);
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
       }
 
       const norm = (raw || []).map(normalizeAlbum);
@@ -121,7 +109,7 @@ export default function WeeklyPage() {
     void loadCanManage();
   }, [loadAlbums, loadCanManage]);
 
-  // Изменить подпись альбома
+  // --- действия с альбомом ---
   const onEditAlbumCaption = useCallback(
     async (album: Album) => {
       if (!canManage) return;
@@ -143,9 +131,7 @@ export default function WeeklyPage() {
           alert(`Не удалось сохранить подпись: ${msg}`);
           return;
         }
-        setAlbums((xs) =>
-          xs.map((x) => (x.safe === album.safe ? { ...x, name: newName } : x)),
-        );
+        setAlbums((xs) => xs.map((x) => (x.safe === album.safe ? { ...x, name: newName } : x)));
       } catch (e) {
         alert(String(e));
       } finally {
@@ -155,7 +141,6 @@ export default function WeeklyPage() {
     [canManage],
   );
 
-  // Удалить альбом целиком
   const onDeleteAlbum = useCallback(
     async (album: Album) => {
       if (!canManage) return;
@@ -224,7 +209,7 @@ export default function WeeklyPage() {
           {albums.map((a) => (
             <li
               key={a.safe}
-              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-0"
+              className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-0"
             >
               <Link href={`/weekly/${encodeURIComponent(a.safe)}`}>
                 <div className="relative h-40 w-full">
@@ -257,7 +242,7 @@ export default function WeeklyPage() {
               </div>
 
               {canManage && (
-                <div className="pointer-events-auto absolute right-3 top-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
+                <div className="absolute right-3 top-3 z-10 flex gap-2">
                   <button
                     disabled={busyKey === a.safe}
                     onClick={() => onEditAlbumCaption(a)}
