@@ -10,7 +10,7 @@ type DeleteRequest = {
   token?: string;
 };
 
-/** Нормализуем сообщение об ошибке без any */
+/** Безопасно вытаскиваем сообщение об ошибке без any */
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -28,11 +28,12 @@ function resolveToken(reqToken?: string): string | undefined {
   return undefined;
 }
 
-/** Батчевое удаление по префиксу с пагинацией курсором */
+/** Батчевое удаление по префиксу с курсорной пагинацией */
 async function deleteByPrefix(prefix: string, token?: string) {
   let deleted = 0;
-  let cursor: string | undefined = undefined;
+  let cursor: string | undefined = undefined; // <-- явная аннотация разрывает цикл инференции
 
+  // бесконечный цикл без eslint-disable
   for (;;) {
     const res: Awaited<ReturnType<typeof list>> = await list({
       prefix,
@@ -46,9 +47,12 @@ async function deleteByPrefix(prefix: string, token?: string) {
       deleted += res.blobs.length;
     }
 
-    const nextCursor = res.cursor; // тип уже string | undefined
-    if (!nextCursor) break;
-    cursor = nextCursor;
+    // Без создания nextCursor — сразу и безопасно продвигаем курсор
+    if (typeof res.cursor === 'string' && res.cursor.length > 0) {
+      cursor = res.cursor;
+    } else {
+      break;
+    }
   }
 
   return deleted;
