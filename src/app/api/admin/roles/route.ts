@@ -24,10 +24,13 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  // на случай старой схемы
   await sql/* sql */`
     ALTER TABLE uploaders
     ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
+  `;
+  await sql/* sql */`
+    ALTER TABLE uploaders
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
   `;
 }
 
@@ -48,7 +51,6 @@ export async function POST(req: Request) {
       return NextResponse.json<NotOk>({ ok: false, error: "ids[] required" }, { status: 400 });
     }
 
-    // нормализуем в массив строк
     const ids: string[] = idsUnknown.map((v) => String(v)).filter((s) => s.trim().length > 0);
     if (ids.length === 0) {
       return NextResponse.json<Ok>({ ok: true, roles: {} });
@@ -57,14 +59,12 @@ export async function POST(req: Request) {
     await ensureSchema();
 
     const roles: RolesMap = {};
-
-    // дефолты: владелец = супер+админ; остальные по умолчанию false
+    // дефолты
     for (const id of ids) {
       const isOwner = id === OWNER_ID;
       roles[id] = { isAdmin: isOwner, isSuperAdmin: isOwner };
     }
-
-    // безопасно ищем роль для каждого id (без массивных плейсхолдеров)
+    // точечно читаем роли
     for (const id of ids) {
       const { rows } = await sql/* sql */`
         SELECT role FROM uploaders WHERE discord_id = ${id} LIMIT 1
