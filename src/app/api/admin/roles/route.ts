@@ -24,6 +24,7 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  // на случай старой схемы
   await sql/* sql */`
     ALTER TABLE uploaders
     ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
@@ -55,23 +56,21 @@ export async function POST(req: Request) {
 
     await ensureSchema();
 
-    // ВАЖНО: для массивов используем sql.array(...)
-    const res = await sql/* sql */`
-      SELECT discord_id, role
-      FROM uploaders
-      WHERE discord_id = ANY(${sql.array(ids, "text")})
-    `;
-
     const roles: RolesMap = {};
-    // дефолты
+
+    // дефолты: владелец = супер+админ; остальные по умолчанию false
     for (const id of ids) {
       const isOwner = id === OWNER_ID;
       roles[id] = { isAdmin: isOwner, isSuperAdmin: isOwner };
     }
-    // применяем найденные роли
-    for (const row of res.rows as Array<{ discord_id: string; role: string }>) {
-      const id = row.discord_id;
-      const role = row.role;
+
+    // безопасно ищем роль для каждого id (без массивных плейсхолдеров)
+    for (const id of ids) {
+      const { rows } = await sql/* sql */`
+        SELECT role FROM uploaders WHERE discord_id = ${id} LIMIT 1
+      `;
+      const role = (rows[0]?.role as string | undefined) ?? undefined;
+
       const isOwner = id === OWNER_ID;
       const isSuperAdmin = isOwner || role === "superadmin";
       const isAdmin = isSuperAdmin || role === "admin";
