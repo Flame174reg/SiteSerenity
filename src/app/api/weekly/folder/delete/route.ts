@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 import { list, del } from "@vercel/blob";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OWNER_ID = "1195944713639960601";
@@ -11,7 +12,7 @@ const OWNER_ID = "1195944713639960601";
 async function isAdminOrOwner(userId: string): Promise<boolean> {
   if (userId === OWNER_ID) return true;
   try {
-    const { rows } = await sql/*sql*/`
+    const { rows } = await sql/* sql */`
       SELECT role FROM uploaders WHERE discord_id = ${userId} LIMIT 1
     `;
     return rows.length > 0 && rows[0].role === "admin";
@@ -22,6 +23,7 @@ async function isAdminOrOwner(userId: string): Promise<boolean> {
 
 export async function POST(req: Request) {
   try {
+    // --- доступ ---
     const session = await auth();
     const me = session?.user?.id;
     if (!me) {
@@ -31,52 +33,66 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
     }
 
-    const body = await req.json().catch(() => null) as { safe?: string } | null;
+    // --- входные данные ---
+    const body = (await req.json().catch(() => null)) as { safe?: string } | null;
     const safe = (body?.safe ?? "").trim();
     if (!safe) {
       return NextResponse.json({ ok: false, error: "safe is required" }, { status: 400 });
     }
 
-    const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_TOKEN;
-    if (!token) {
-      return NextResponse.json(
-        { ok: false, error: "Missing BLOB_READ_WRITE_TOKEN/BLOB_TOKEN" },
-        { status: 500 }
-      );
-    }
+    // Токен для RW, если используется. На Vercel можно не указывать, если подключена интеграция.
+    const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_TOKEN || undefined;
 
+    // Ключи в Blob хранятся как weekly/<safe>/...
     const prefix = `weekly/${safe}/`;
+
+    // --- удаляем ВСЁ в папке постранично через cursor ---
     let deleted = 0;
     let cursor: string | undefined = undefined;
 
-    // Удаляем ВСЕ объекты в папке (постранично)
-    do {
-      const { blobs, hasMore, cursor: nextCursor } = await list({
+    while (true) {
+      const { blobs, cursor: nextCursor } = await list({
         prefix,
         limit: 1000,
         cursor,
         token,
       });
-      if (blobs.length) {
-        await Promise.all(blobs.map((b) => del(b.url, { token })));
-        deleted += blobs.length;
+
+      for (const b of blobs) {
+        await del(b.url, { token });
       }
-      cursor = hasMore ? nextCursor : undefined;
-    } while (cursor);
+      deleted += blobs.length;
+
+      if (!nextCursor) break;
+      cursor = nextCursor;
+    }
+
+    // --- чистим подписи в БД (если таблица есть) ---
+    try {
+      await sql/* sql */`
+        DELETE FROM weekly_photos
+        WHERE key LIKE ${prefix + "%"}
+      `;
+    } catch {
+      // таблицы может не быть — это не критично
+    }
 
     return NextResponse.json({ ok: true, safe, deleted });
   } catch (e) {
-    // всегда возвращаем JSON, чтобы клиентский парсер не падал
+    // всегда JSON, чтобы клиентский парсер не падал
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
 }
 
-// Разрешим также DELETE-метод тем же кодом
+// Поддержим DELETE тем же кодом
 export async function DELETE(req: Request) {
   return POST(req);
 }
 
-// На всякий — CORS/префлайт, чтобы не ловить 405 на OPTIONS
+// Префлайт/служебные — чтобы не ловить 405
 export function OPTIONS() {
-  return NextResponse.json({ ok: true });
+  return new Response(null, { status: 204 });
+}
+export function HEAD() {
+  return new Response(null, { status: 200 });
 }
