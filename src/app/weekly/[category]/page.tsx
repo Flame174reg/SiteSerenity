@@ -1,23 +1,21 @@
 // src/app/weekly/[category]/page.tsx
+
 import WeeklyFolderClient from "../folder.client";
 
-export const dynamic = "force-dynamic";
+type PageProps = {
+  params: { category: string };
+};
 
-export default async function WeeklyCategoryPage(
-  { params }: { params: Promise<{ category: string }> }
-) {
-  const { category } = await params; // Next 15: params — Promise
-  const categorySafe = category;     // safe-сегмент из URL
-  const categoryHuman = decodeURIComponent(categorySafe);
+export default function WeeklyCategoryPage({ params }: PageProps) {
+  // safe-сегмент папки из URL
+  const categorySafe = params.category;
+
+  // человекочитаемое имя — декодируем safe (если нужен иной источник — логика останется прежней)
+  const categoryHuman = decodeURIComponent(categorySafe).replace(/\+/g, " ");
 
   return (
-    <main className="px-6 py-8">
-      <div className="mx-auto max-w-6xl">
-        <WeeklyFolderClient
-          categorySafe={categorySafe}
-          categoryHuman={categoryHuman}
-        />
-      </div>
-    </main>
+    <div className="mx-auto max-w-6xl">
+      <WeeklyFolderClient safe={categorySafe} name={categoryHuman} />
+    </div>
   );
 }
