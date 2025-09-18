@@ -12,15 +12,28 @@ type Item = {
   caption?: string | null;
 };
 
-type ListResp = { ok: true; items: Item[] } | { ok: false; items: Item[]; error: string };
+type ListResp =
+  | { ok: true; items: Item[] }
+  | { ok: false; items: Item[]; error: string };
 
-export default function FolderClient({ safe, name }: { safe: string; name: string }) {
+export default function FolderClient(
+  { safe: _safe, name }: { safe: string; name: string }
+) {
+  // Помечаем как «использованный», чтобы ESLint не ругался:
+  void _safe;
+
   const [data, setData] = useState<ListResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
 
-  const listUrl = useMemo(() => `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`, [name]);
+  // Можно обойтись и без таймстемпа (cache: "no-store" уже хватает),
+  // но оставляю как у тебя.
+  const listUrl = useMemo(
+    () =>
+      `/api/weekly/list?category=${encodeURIComponent(name)}&t=${Date.now()}`,
+    [name]
+  );
 
   useEffect(() => {
     (async () => {
@@ -109,37 +122,41 @@ export default function FolderClient({ safe, name }: { safe: string; name: strin
       <h2 className="text-xl font-semibold">{name}</h2>
       {loading && <div className="text-white/70">Загружаем изображения…</div>}
       {!loading && err && <div className="text-red-400">Ошибка: {err}</div>}
-      {!loading && !err && items.length === 0 && <div className="text-white/70">В папке пока пусто.</div>}
+      {!loading && !err && items.length === 0 && (
+        <div className="text-white/70">В папке пока пусто.</div>
+      )}
 
       {!loading && !err && items.length > 0 && (
-        <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
           {items.map((it) => (
             <li key={it.key} className="group relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={it.url}
                 alt={it.caption ?? it.key}
-                className="w-full h-40 object-cover rounded-lg cursor-zoom-in"
+                className="h-40 w-full cursor-zoom-in rounded-lg object-cover"
                 onClick={() => setPreview(it)}
               />
               <div className="absolute bottom-2 left-2 right-2 text-xs text-white">
                 {(it.caption ?? "").trim() && (
-                  <span className="px-1.5 py-1 bg-black/60 rounded">{it.caption}</span>
+                  <span className="rounded bg-black/60 px-1.5 py-1">
+                    {it.caption}
+                  </span>
                 )}
               </div>
 
               {canManage && (
-                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                <div className="absolute right-2 top-2 flex gap-2 opacity-0 transition group-hover:opacity-100">
                   <button
                     onClick={() => onEditCaption(it)}
-                    className="rounded-md bg-white/80 hover:bg-white text-black text-xs px-2 py-1"
+                    className="rounded-md bg-white/80 px-2 py-1 text-xs text-black hover:bg-white"
                     title="Подпись"
                   >
                     Подпись
                   </button>
                   <button
                     onClick={() => onDeletePhoto(it)}
-                    className="rounded-md bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1"
+                    className="rounded-md bg-red-500/80 px-2 py-1 text-xs text-white hover:bg-red-500"
                     title="Удалить"
                   >
                     Удалить
@@ -154,14 +171,18 @@ export default function FolderClient({ safe, name }: { safe: string; name: strin
       {/* Лайтбокс */}
       {preview && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setPreview(null)}
         >
-          <div className="max-w-5xl w-full">
+          <div className="w-full max-w-5xl">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview.url} alt={preview.caption ?? preview.key} className="w-full h-auto rounded-lg" />
+            <img
+              src={preview.url}
+              alt={preview.caption ?? preview.key}
+              className="h-auto w-full rounded-lg"
+            />
             {(preview.caption ?? "").trim() && (
-              <div className="mt-2 text-white text-sm">{preview.caption}</div>
+              <div className="mt-2 text-sm text-white">{preview.caption}</div>
             )}
           </div>
         </div>
