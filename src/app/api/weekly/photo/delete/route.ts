@@ -4,8 +4,8 @@ import { auth } from "@/auth";
 import { sql } from "@vercel/postgres";
 import { del } from "@vercel/blob";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const OWNER_ID = "1195944713639960601";
 
@@ -26,29 +26,31 @@ export async function POST(req: Request) {
     const session = await auth();
     const me = session?.user?.id;
     if (!me) return NextResponse.json({ ok: false, error: "unauthenticated" }, { status: 401 });
-    if (!(await isAdminOrOwner(me))) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    if (!(await isAdminOrOwner(me))) {
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    }
 
     const body = (await req.json().catch(() => null)) as { key?: string; url?: string } | null;
     const key = (body?.key ?? "").trim();
     const url = (body?.url ?? "").trim();
 
-    if (!key || !url) {
-      return NextResponse.json({ ok: false, error: "key and url are required" }, { status: 400 });
+    if (!key && !url) {
+      return NextResponse.json({ ok: false, error: "key or url is required" }, { status: 400 });
     }
 
     const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_TOKEN || undefined;
 
-    await del(url, { token });
+    // Удаляем blob
+    await del(url || key, { token });
 
+    // Чистим подпись
     try {
-      await sql/* sql */`
-        DELETE FROM weekly_photos WHERE key = ${key}
-      `;
+      await sql/* sql */`DELETE FROM weekly_photos WHERE key = ${key || url}`;
     } catch {
-      // если нет таблицы — игнор
+      // ок, если таблицы нет
     }
 
-    return NextResponse.json({ ok: true, key });
+    return NextResponse.json({ ok: true, key: key || url });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
   }
