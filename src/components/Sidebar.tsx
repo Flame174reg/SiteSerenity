@@ -6,7 +6,11 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import AccountCard from "./AccountCard";
 
-const OWNER_ID = "1195944713639960601, 1069155545770098739";
+const OWNER_ID = "1195944713639960601";
+
+type RolesResp =
+  | { ok: true; roles: Record<string, { isAdmin: boolean; isSuperAdmin: boolean }> }
+  | { ok: false; error: string };
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
@@ -15,15 +19,45 @@ export default function Sidebar() {
   const { data: session } = useSession();
 
   const meId =
-    (session?.user as { id?: string; email?: string } | undefined)?.id ||
-    (session?.user as { email?: string } | undefined)?.email ||
-    null;
-  const isOwner = meId === OWNER_ID;
+    ((session?.user as { id?: string; email?: string } | undefined)?.id ??
+      (session?.user as { email?: string } | undefined)?.email ??
+      null);
 
+  const isOwner = meId === OWNER_ID;
+  const [isSuper, setIsSuper] = useState(false);
+
+  // Узнаём у сервера, является ли текущий пользователь суперадмином
+  useEffect(() => {
+    if (!meId || isOwner) {
+      setIsSuper(false);
+      return;
+    }
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: [meId] }),
+          cache: "no-store",
+        });
+        const j = (await r.json().catch(() => null)) as RolesResp | null;
+        if (j && "ok" in j && j.ok) {
+          setIsSuper(Boolean(j.roles?.[meId]?.isSuperAdmin));
+        } else {
+          setIsSuper(false);
+        }
+      } catch {
+        setIsSuper(false);
+      }
+    })();
+  }, [meId, isOwner]);
+
+  // Закрывать меню при смене маршрута
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
+  // Блокируем прокрутку
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "";
     if (open) closeBtnRef.current?.focus();
@@ -32,6 +66,7 @@ export default function Sidebar() {
     };
   }, [open]);
 
+  // Закрытие по Esc
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,13 +76,7 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const Item = ({
-    href,
-    children,
-  }: {
-    href: string;
-    children: React.ReactNode;
-  }) => (
+  const Item = ({ href, children }: { href: string; children: React.ReactNode }) => (
     <Link
       href={href}
       onClick={() => setOpen(false)}
@@ -56,6 +85,8 @@ export default function Sidebar() {
       {children}
     </Link>
   );
+
+  const showAdminLink = isOwner || isSuper;
 
   return (
     <>
@@ -99,13 +130,12 @@ export default function Sidebar() {
         <AccountCard />
 
         <div className="mt-4 space-y-3">
-          {/* Админ-панель — только владельцу */}
-          {isOwner && <Item href="/admin">Админ-панель</Item>}
+          {/* Админ-панель — владельцу и суперадминам */}
+          {showAdminLink && <Item href="/admin">Админ-панель</Item>}
 
           <Item href="/">Главная</Item>
 
           <div className="px-3 pt-3 text-xs uppercase opacity-60">Памятки</div>
-          {/* правильные пути из репозитория */}
           <Item href="/memos/gov">Памятки госника</Item>
           <Item href="/memos/interrogations">Памятка по допросам</Item>
           <Item href="/memos/anti">Памятка против душки</Item>
