@@ -23,7 +23,6 @@ function truthy(v: unknown): boolean {
 }
 
 async function ensureSchema() {
-  // Базовая таблица
   await sql/* sql */`
     CREATE TABLE IF NOT EXISTS uploaders (
       discord_id TEXT PRIMARY KEY,
@@ -31,7 +30,6 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  // Догоняем старую схему: добавляем недостающие столбцы
   await sql/* sql */`
     ALTER TABLE uploaders
     ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'
@@ -79,22 +77,15 @@ async function getMeId(req: NextRequest): Promise<string | null> {
   );
 }
 
-async function isSuperAdminOrOwner(id: string): Promise<boolean> {
-  if (id === OWNER_ID) return true;
-  await ensureSchema();
-  const { rows } = await sql/* sql */`
-    SELECT role FROM uploaders WHERE discord_id = ${id} LIMIT 1
-  `;
-  return rows[0]?.role === "superadmin";
-}
-
 export async function POST(req: NextRequest) {
   try {
     const me = await getMeId(req);
     if (!me) return NextResponse.json<NotOk>({ ok: false, error: "unauthenticated" }, { status: 401 });
 
-    const allowed = await isSuperAdminOrOwner(me);
-    if (!allowed) return NextResponse.json<NotOk>({ ok: false, error: "forbidden" }, { status: 403 });
+    // ВАЖНО: только владелец может менять супер-роль
+    if (me !== OWNER_ID) {
+      return NextResponse.json<NotOk>({ ok: false, error: "forbidden (owner only)" }, { status: 403 });
+    }
 
     const body = (await req.json().catch(() => null)) as unknown;
     if (!isRec(body)) return NextResponse.json<NotOk>({ ok: false, error: "invalid json" }, { status: 400 });
@@ -110,7 +101,6 @@ export async function POST(req: NextRequest) {
     await ensureSchema();
 
     if (superFlag) {
-      // апгрейд до superadmin
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'superadmin', NOW())
@@ -119,7 +109,6 @@ export async function POST(req: NextRequest) {
       `;
       return NextResponse.json<Ok>({ ok: true, id, super: true, role: "superadmin" });
     } else {
-      // понижение до admin
       await sql/* sql */`
         INSERT INTO uploaders (discord_id, role, updated_at)
         VALUES (${id}, 'admin', NOW())
