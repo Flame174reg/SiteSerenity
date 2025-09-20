@@ -116,7 +116,7 @@ export default function RulesPage() {
           <hr className="border-white/10" />
 
           {/* Раздел 4 */}
-          <section id="p3" className="space-y-4 scroll-mt-24">
+          <section id="p4" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">Обязанности старшего состава</h2>
             <ul className="list-disc pl-6 space-y-2 leading-relaxed marker:text-gray-500">
               <li></li>
@@ -136,7 +136,7 @@ export default function RulesPage() {
           <hr className="border-white/10" />
 
           {/* Раздел 5 */}
-          <section id="p2" className="space-y-4 scroll-mt-24">
+          <section id="p5" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">Защита участников</h2>
             <ul className="list-disc pl-6 space-y-2 leading-relaxed marker:text-gray-500">
               <li>Семья гарантирует отсутствие несправедливых наказаний без оснований.</li>
@@ -148,7 +148,7 @@ export default function RulesPage() {
 
           <hr className="border-white/10" />
           {/* Раздел 6 */}
-          <section id="p2" className="space-y-4 scroll-mt-24">
+          <section id="p6" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">Заключительные положения</h2>
             <ul className="list-disc pl-6 space-y-2 leading-relaxed marker:text-gray-500">
               <li>Настоящие правила обязательны для всех участников семьи.</li>
