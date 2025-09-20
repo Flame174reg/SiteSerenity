@@ -25,9 +25,9 @@ export default function RulesPage() {
             <li><a className="hover:underline" href="#p1">Общие положения</a></li>
             <li><a className="hover:underline" href="#p2">Dress-Code и транспорт</a></li>
             <li><a className="hover:underline" href="#p3">Общие запреты</a></li>
-            <li><a className="hover:underline" href="#p3">Обязанности старшего состава</a></li>
-            <li><a className="hover:underline" href="#p3">Защита участников</a></li>
-            <li><a className="hover:underline" href="#p3">Заключительные положения</a></li>
+            <li><a className="hover:underline" href="#p4">Обязанности старшего состава</a></li>
+            <li><a className="hover:underline" href="#p5">Защита участников</a></li>
+            <li><a className="hover:underline" href="#p6">Заключительные положения</a></li>
           </ul>
         </aside>
 
