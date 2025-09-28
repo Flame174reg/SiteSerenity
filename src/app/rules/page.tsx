@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 export const metadata = {
   title: "Правила семьи",
   description: "Внутренние правила и политика сообщества",
@@ -10,7 +12,9 @@ export const metadata = {
   },
 };
 
-function Punish({ children }) {
+type PunishProps = { children: ReactNode };
+
+function Punish({ children }: PunishProps) {
   // Небольшой "бэйдж" для наказаний
   return (
     <span className="ml-1 inline-flex items-center gap-2 rounded-md border border-red-400/40 bg-red-400/10 px-2 py-0.5 text-xs font-semibold tracking-wide text-red-300">
@@ -23,7 +27,7 @@ export default function RulesPage() {
   return (
     <main id="top" className="px-6 py-10">
       <div className="mx-auto max-w-5xl grid gap-8 lg:grid-cols-[240px_1fr]">
-        {/* Сайдбар со статическим содержанием */}
+        {/* Сайдбар */}
         <aside
           className="rounded-xl border border-white/10 bg-white/5 p-4 lg:sticky lg:top-6 h-max"
           role="navigation"
@@ -31,18 +35,17 @@ export default function RulesPage() {
         >
           <p className="font-semibold mb-2">Содержание</p>
           <ul className="grid gap-1 text-sm">
-            <li><a className="hover:underline" href="#p1">I. Общие положения</a></li>
-            <li><a className="hover:underline" href="#p2">II. Dress-Code и транспорт</a></li>
-            <li><a className="hover:underline" href="#p3">III. Запреты</a></li>
-            <li><a className="hover:underline" href="#p4">IV. Обязанности старшего состава</a></li>
-            <li><a className="hover:underline" href="#p5">V. Защита участников</a></li>
+            <li><a href="#p1" className="hover:underline">I. Общие положения</a></li>
+            <li><a href="#p2" className="hover:underline">II. Dress-Code и транспорт</a></li>
+            <li><a href="#p3" className="hover:underline">III. Запреты</a></li>
+            <li><a href="#p4" className="hover:underline">IV. Обязанности старшего состава</a></li>
+            <li><a href="#p5" className="hover:underline">V. Защита участников</a></li>
           </ul>
         </aside>
 
         {/* Контент */}
         <div className="space-y-10">
-          {/* Шапка */}
-          <section className="space-y-3">
+          <section>
             <h1 className="text-4xl font-extrabold tracking-tight">Правила семьи</h1>
           </section>
 
@@ -85,106 +88,31 @@ export default function RulesPage() {
           <section id="p3" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold">III. Запреты</h2>
             <ul className="list-disc pl-6 space-y-2 leading-relaxed marker:text-gray-500">
-              <li>
-                3.1. Оскорбления, унижения, агрессия и разжигание конфликтов запрещены. Допустимы только лёгкие подшучивания без ущерба чести и достоинству. Все конфликты должны решаться мирным путём, а при невозможности - передаваться старшему составу, лидеру или заместителям.
-                <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish>
-              </li>
-              <li>
-                3.2. Аморальное и неадекватное поведение, дискредитирующее семью.
-                <Punish>| TIMEOUT от 1 дня | WARN | KICK</Punish>
-              </li>
-              <li>
-                3.3. Распространение ложной информации о семье и её участниках.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.4. Спам, флуд, чрезмерное использование Caps Lock, дублирование сообщений и оффтоп в каналах строгого назначения.
-                <Punish>| TIMEOUT от 1 часа</Punish>
-              </li>
-              <li>
-                3.5. Обман, манипуляции, угрозы и давление на участников.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.6. Использование семьи в личных целях.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.7. Игнорирование семейных мероприятий.
-                <Punish>| WARN</Punish>
-              </li>
-              <li>
-                3.8. Присвоение ресурсов семейного склада.
-                <Punish>| WARN | KICK</Punish>
-              </li>
-              <li>
-                3.9. Неуважение к участникам семьи, руководству.
-                <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish>
-              </li>
-              <li>
-                3.10. Использование читов, макросов, багов и эксплойтов.
-                <span className="ml-1"><Punish>| KICK</Punish></span>
-              </li>
-              <li>
-                3.11. Злоупотребление рангом и властью.
-                <Punish>| Понижение в должности | WARN</Punish>
-              </li>
-              <li>
-                3.12. Самовольное присвоение полномочий модерации, администрации или руководства.
-                <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish>
-              </li>
-              <li>
-                3.13. Распространение персональных данных участников и травля.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.14. Любые попытки обхода правил, ограничений или их двусмысленное толкование в свою пользу.
-                <Punish>| Понижение в должности | WARN</Punish>
-              </li>
-              <li>
-                3.15. Провокации на нарушение правил.
-                <Punish>| TIMEOUT от 1 часа | WARN</Punish>
-              </li>
-              <li>
-                3.16. Обсуждение политических, расовых, межнациональных тем, а также публикация экстремистских, расистских, фашистских и порнографических материалов.
-                <Punish>| TIMEOUT от 1 дня | WARN</Punish>
-              </li>
-              <li>
-                3.17. Торговля или услуги за реальную валюту.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.18. Мошенничество и ввод в заблуждение ради выгоды.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.19. Распространение вредоносных ссылок, файлов и программного обеспечения.
-                <Punish>| TIMEOUT от 1 дня | KICK</Punish>
-              </li>
-              <li>
-                3.20. Публикация ссылок на сторонние Discord-серверы и проекты.
-                <Punish>| TIMEOUT от 1 часа</Punish>
-              </li>
-              <li>
-                3.21. Любые схемы, связанные с азартными играми.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.22. Недобросовестное исполнение обязанностей, халатность или систематическое бездействие.
-                <Punish>| Понижение в должности</Punish>
-              </li>
-              <li>
-                3.23. Несоблюдение правил из главы &quot;II. Dress-Code и транспорт&quot;.
-                <Punish>| WARN</Punish>
-              </li>
-              <li>
-                3.24. Отсутствие в игре более 8 дней без предупреждения в канале &quot;отпуск&quot; расценивается как неактивность.
-                <Punish>| KICK</Punish>
-              </li>
-              <li>
-                3.25. Повторное нарушение правил после предупреждения или наказания влечёт более строгие меры воздействия.
-                <Punish>| TIMEOUT от 1 часа | WARN | Понижение в должности | KICK</Punish>
-              </li>
+              <li>3.1. Оскорбления, унижения, агрессия и разжигание конфликтов запрещены. Допустимы только лёгкие подшучивания без ущерба чести и достоинству. Все конфликты должны решаться мирным путём, а при невозможности - передаваться старшему составу, лидеру или заместителям. <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish></li>
+              <li>3.2. Аморальное и неадекватное поведение, дискредитирующее семью. <Punish>| TIMEOUT от 1 дня | WARN | KICK</Punish></li>
+              <li>3.3. Распространение ложной информации о семье и её участниках. <Punish>| KICK</Punish></li>
+              <li>3.4. Спам, флуд, чрезмерное использование Caps Lock, дублирование сообщений и оффтоп в каналах строгого назначения. <Punish>| TIMEOUT от 1 часа</Punish></li>
+              <li>3.5. Обман, манипуляции, угрозы и давление на участников. <Punish>| KICK</Punish></li>
+              <li>3.6. Использование семьи в личных целях. <Punish>| KICK</Punish></li>
+              <li>3.7. Игнорирование семейных мероприятий. <Punish>| WARN</Punish></li>
+              <li>3.8. Присвоение ресурсов семейного склада. <Punish>| WARN | KICK</Punish></li>
+              <li>3.9. Неуважение к участникам семьи, руководству. <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish></li>
+              <li>3.10. Использование читов, макросов, багов и эксплойтов. <Punish>| KICK</Punish></li>
+              <li>3.11. Злоупотребление рангом и властью. <Punish>| Понижение в должности | WARN</Punish></li>
+              <li>3.12. Самовольное присвоение полномочий модерации, администрации или руководства. <Punish>| TIMEOUT от 1 часа | WARN | KICK</Punish></li>
+              <li>3.13. Распространение персональных данных участников и травля. <Punish>| KICK</Punish></li>
+              <li>3.14. Любые попытки обхода правил, ограничений или их двусмысленное толкование в свою пользу. <Punish>| Понижение в должности | WARN</Punish></li>
+              <li>3.15. Провокации на нарушение правил. <Punish>| TIMEOUT от 1 часа | WARN</Punish></li>
+              <li>3.16. Обсуждение политических, расовых, межнациональных тем, а также публикация экстремистских, расистских, фашистских и порнографических материалов. <Punish>| TIMEOUT от 1 дня | WARN</Punish></li>
+              <li>3.17. Торговля или услуги за реальную валюту. <Punish>| KICK</Punish></li>
+              <li>3.18. Мошенничество и ввод в заблуждение ради выгоды. <Punish>| KICK</Punish></li>
+              <li>3.19. Распространение вредоносных ссылок, файлов и программного обеспечения. <Punish>| TIMEOUT от 1 дня | KICK</Punish></li>
+              <li>3.20. Публикация ссылок на сторонние Discord-серверы и проекты. <Punish>| TIMEOUT от 1 часа</Punish></li>
+              <li>3.21. Любые схемы, связанные с азартными играми. <Punish>| KICK</Punish></li>
+              <li>3.22. Недобросовестное исполнение обязанностей, халатность или систематическое бездействие. <Punish>| Понижение в должности</Punish></li>
+              <li>3.23. Несоблюдение правил из главы &quot;II. Dress-Code и транспорт&quot;. <Punish>| WARN</Punish></li>
+              <li>3.24. Отсутствие в игре более 8 дней без предупреждения в канале &quot;отпуск&quot; расценивается как неактивность. <Punish>| KICK</Punish></li>
+              <li>3.25. Повторное нарушение правил после предупреждения или наказания влечёт более строгие меры воздействия. <Punish>| TIMEOUT от 1 часа | WARN | Понижение в должности | KICK</Punish></li>
             </ul>
           </section>
 
