@@ -18,34 +18,35 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ru">
-      <body className="min-h-screen text-white antialiased">
-        {/* Глобальный фон */}
+      <body className="min-h-screen antialiased">
         <ThemeBackground />
 
-        {/* Глобальный хедер */}
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur">
-          <div className="mx-auto max-w-5xl h-14 px-6 flex items-center justify-between">
-            {/* Кнопка на главную */}
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm bg-white/5 border border-white/10 hover:bg-white/10"
-            >
-              ← На главную
-            </Link>
-
-            {/* Навигация */}
-            <nav className="flex items-center gap-4 text-sm">
-              <Link href="/rules" className="hover:underline">
-                Правила
+        <header className="sticky top-0 z-40 backdrop-soft border-b border-white/6 bg-[rgba(11,14,20,0.24)]">
+          <div className="container-max h-16 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="logo">
+                <span className="inline-block w-8 h-8 rounded-md" style={{background:'linear-gradient(135deg,var(--accent),#4c1d95)'}}/>
+                <span>Site Serenity</span>
               </Link>
+            </div>
+
+            <nav className="hidden md:flex items-center gap-6 text-sm muted">
+              <Link href="/rules" className="hover:underline muted">Правила</Link>
+              <Link href="/guides" className="hover:underline muted">Гайды</Link>
+              <Link href="/weekly" className="hover:underline muted">Еженедельник</Link>
             </nav>
           </div>
         </header>
 
-        {/* Провайдер сессии + выдвижная колонка + контент */}
         <SessionProviderWrapper>
-          <Sidebar />      {/* ⬅️ выдвижная панель слева */}
-          {children}
+          <div className="container-max grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 pt-6">
+            <aside className="lg-sidebar-visible">
+              <Sidebar />
+            </aside>
+            <main className="min-h-[60vh]">
+              {children}
+            </main>
+          </div>
         </SessionProviderWrapper>
       </body>
     </html>

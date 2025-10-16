@@ -35,21 +35,20 @@ export default function AccountCard() {
   }, [status]);
 
   return (
-    <div className="rounded-xl border border-white/10 bg-black/50 p-4">
+    <div className="card">
       <div className="flex items-center gap-3">
-        <UserBadgeIcon />
+        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-600 to-purple-700 flex items-center justify-center text-white">
+          <UserBadgeIcon />
+        </div>
         <div className="min-w-0">
-          <div className="text-xs opacity-70">
+          <div className="text-xs muted">
             {loading ? (
               "Загрузка…"
             ) : session ? (
               <>
-                USER ID:{" "}
+                <span className="small">USER ID:</span>{" "}
                 <span className="font-semibold">
-                  {(session as any)?.discordId ??
-                    session?.user?.email ??
-                    session?.user?.name ??
-                    "—"}
+                  {(session as any)?.discordId ?? session?.user?.email ?? session?.user?.name ?? "—"}
                 </span>
               </>
             ) : (
@@ -63,24 +62,15 @@ export default function AccountCard() {
       <div className="mt-3">
         {loading ? null : session ? (
           <div className="flex items-center gap-2">
-            <Link
-              href="/account"
-              className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10"
-            >
+            <Link href="/account" className="btn-ghost inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm">
               Открыть →
             </Link>
-            <button
-              onClick={() => signOut()}
-              className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10"
-            >
+            <button onClick={() => signOut()} className="btn inline-flex items-center gap-1">
               Выйти
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => signIn("discord")}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10"
-          >
+          <button onClick={() => signIn("discord")} className="btn inline-flex items-center gap-1">
             Войти →
           </button>
         )}
