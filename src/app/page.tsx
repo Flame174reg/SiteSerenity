@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="min-h-[calc(100vh-56px)] grid place-items-center px-6">
@@ -13,8 +15,8 @@ export default function Home() {
           </p>
 
           <div className="mt-6 flex justify-center gap-3">
-            <a href="/weekly" className="btn">Еженедельник</a>
-            <a href="/contracts" className="btn-ghost">Документы</a>
+            <Link href="/weekly" className="btn">Еженедельник</Link>
+            <Link href="/contracts" className="btn-ghost">Документы</Link>
           </div>
         </div>
 

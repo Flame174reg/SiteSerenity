@@ -1,6 +1,5 @@
 // src/app/admin/page.tsx
 import { auth } from "@/auth";
-import { notFound } from "next/navigation";
 import AdminClient from "./ui/AdminClient";
 import { sql } from "@vercel/postgres";
 
@@ -37,7 +36,14 @@ export default async function AdminPage() {
   const allowed =
     !!me && (me === OWNER_ID || (await isSuperAdmin(me)));
 
-  if (!allowed) notFound();
+  if (!allowed) {
+    return (
+      <div className="mx-auto max-w-4xl">
+        <h1 className="mb-2 text-2xl font-semibold">404 — не найдено</h1>
+        <p className="mb-4 opacity-70">У вас нет доступа к этой странице.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl">

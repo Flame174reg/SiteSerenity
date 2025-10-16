@@ -1,4 +1,5 @@
 // src/components/ThemeBackground.tsx
+"use client";
 export default function ThemeBackground() {
   return (
     <>

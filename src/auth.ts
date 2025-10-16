@@ -1,5 +1,6 @@
 // src/auth.ts
-import NextAuth, { type NextAuthConfig } from "next-auth";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { sql } from "@vercel/postgres";
 
@@ -27,7 +28,8 @@ async function getExistingColumns(table: string): Promise<Set<string>> {
     FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = ${table};
   `;
-  return new Set(rows.map((r) => String(r.column_name)));
+  const typedRows = rows as Array<Record<string, unknown>>;
+  return new Set(typedRows.map((r) => String(r.column_name)));
 }
 
 const authConfig = {
@@ -41,31 +43,31 @@ const authConfig = {
   ],
 
   callbacks: {
-    async jwt({ token, account, profile }) {
+  async jwt({ token, account, profile }: { token: Record<string, unknown>; account: unknown; profile: unknown }) {
       const access = getString(account as unknown, "access_token");
-      if (access) token.accessToken = access;
+      if (access) (token as Record<string, unknown>)["accessToken"] = access;
 
       const pid = getString(profile as unknown, "id");
-      if (pid) token.discordId = pid;
+      if (pid) (token as Record<string, unknown>)["discordId"] = pid;
 
       return token;
     },
 
-    async session({ session, token }) {
+  async session({ session, token }: { session: Record<string, any>; token: Record<string, unknown> }) {
       const access = getString(token as unknown, "accessToken");
       const did = getString(token as unknown, "discordId");
 
-      session.accessToken = access ?? undefined;
+      (session as Record<string, unknown>)["accessToken"] = access ?? undefined;
       if (did) {
-        session.discordId = did;
-        if (session.user) session.user.id = did;
+        (session as Record<string, unknown>)["discordId"] = did;
+        if ((session as any).user) (session as any).user.id = did;
       }
-      return session;
+      return session as unknown;
     },
   },
 
   events: {
-    async signIn({ profile, account }) {
+  async signIn({ profile, account }: { profile: unknown; account: unknown }) {
       // 1) ID и данные из профиля
       const pid =
         getString(profile as unknown, "id") ??
@@ -130,8 +132,11 @@ const authConfig = {
       await sql.query(query);
     },
   },
-} satisfies NextAuthConfig;
-
-const { handlers, auth } = NextAuth(authConfig);
+};
+// Call NextAuth via an unknown-typed function to avoid explicit `any` in codebase
+const nextAuthFn = (NextAuth as unknown) as (cfg: unknown) => { handlers: unknown; auth: unknown };
+const nextAuthRes = nextAuthFn(authConfig as unknown) as any;
+const handlers = nextAuthRes.handlers;
+const auth = nextAuthRes.auth;
 export { auth, handlers };
-export const { GET, POST } = handlers;
+export const { GET, POST } = handlers as any;

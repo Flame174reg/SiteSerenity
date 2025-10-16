@@ -75,11 +75,13 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const Item = ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <Link href={href} onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 hover:bg-white/10">
-      {children}
-    </Link>
-  );
+  function Item({ href, children }: { href: string; children?: React.ReactNode }) {
+    return (
+      <Link href={href} onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 hover:bg-white/10">
+        {children}
+      </Link>
+    );
+  }
 
   const showAdminLink = isOwner || isSuper;
 
