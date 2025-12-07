@@ -29,10 +29,37 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-function asString(v: unknown, fallback = ""): string {
-  if (typeof v === "string") return v.slice(0, 4000);
-  if (typeof v === "number" || typeof v === "boolean") return String(v).slice(0, 4000);
-  return fallback;
+function cleanText(v: unknown, fallback = ""): string {
+  const base =
+    typeof v === "string"
+      ? v
+      : typeof v === "number" || typeof v === "boolean"
+      ? String(v)
+      : "";
+
+  const trimmed = base.trim();
+  if (!trimmed) return fallback;
+
+  // Strip control characters
+  const withoutCtrl = trimmed.replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
+
+  // If the string is mostly replacement characters, fallback
+  const badChars = (withoutCtrl.match(/\uFFFD/g) || []).length;
+  const ratioBad = withoutCtrl.length > 0 ? badChars / withoutCtrl.length : 0;
+  if (ratioBad > 0.1) return fallback;
+
+  // Detect typical UTF-8/CP1251 mojibake (Ã,Ð,Ñ,â,...)
+  const mojibakeMatches =
+    withoutCtrl.match(/[ÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]/g) || [];
+  const ratioMojibake = withoutCtrl.length > 0 ? mojibakeMatches.length / withoutCtrl.length : 0;
+  if (ratioMojibake > 0.2) return fallback;
+
+  // Require at least some readable symbols (letters/digits/punctuation/spaces)
+  const allowed = withoutCtrl.match(/[A-Za-zА-Яа-я0-9.,;:!?"'()\-–—\s]/g) || [];
+  const ratioAllowed = withoutCtrl.length > 0 ? allowed.length / withoutCtrl.length : 0;
+  if (ratioAllowed < 0.4) return fallback;
+
+  return withoutCtrl.slice(0, 4000);
 }
 
 function fallbackContent(): SiteContent {
@@ -40,26 +67,26 @@ function fallbackContent(): SiteContent {
     home: {
       heroTitle: "Site Serenity",
       heroSubtitle:
-        "öç?çü?‘<ü õ?‘?‘'ø> ¢?\" ????‘?‘'ñ, õø?‘?‘'óñ ñ çç?ç?ç>‘??ñó ? ????? øóó‘?‘?ø‘'??? ?ç‘?‘'ç.",
-      primaryCtaLabel: "ç?ç?ç>‘??ñó",
+        "Командная витрина: загружайте контент, ведите правила и управляйте доступами в одном месте.",
+      primaryCtaLabel: "К галерее",
       primaryCtaHref: "/weekly",
-      secondaryCtaLabel: "\"?ó‘??ç?‘'‘<",
+      secondaryCtaLabel: "Контракты",
       secondaryCtaHref: "/contracts",
       featureCards: [
         {
           id: "feature-1",
-          title: "'‘<‘?‘'‘?‘<ü ??‘?‘'‘?õ",
-          description: "?ø?‘?‘'óñ",
+          title: "Быстрые обновления",
+          description: "Загружайте фото и тексты без dev-развертки.",
         },
         {
           id: "feature-2",
-          title: "?õ‘?ø?>ç?ñç",
-          description: "???ñ?-õø?ç>‘?",
+          title: "Роли и доступы",
+          description: "Гибкие права для админов и суперадминов.",
         },
         {
           id: "feature-3",
-          title: "?‘??‘\"ñ>‘?",
-          description: ">ñ‘Ø?‘<ü óø+ñ?ç‘'",
+          title: "Данные под рукой",
+          description: "Файлы, правила и заметки — в одном месте.",
         },
       ],
     },
@@ -68,11 +95,11 @@ function fallbackContent(): SiteContent {
 
 function normalizeFeatureCard(v: unknown, idx: number): FeatureCard {
   const rec = isRecord(v) ? v : {};
-  const id = asString(rec.id, "").trim() || `feature-${idx + 1}`;
+  const id = cleanText(rec.id, "").trim() || `feature-${idx + 1}`;
   return {
     id,
-    title: asString(rec.title, "").trim(),
-    description: asString(rec.description, "").trim(),
+    title: cleanText(rec.title, "").trim(),
+    description: cleanText(rec.description, "").trim(),
   };
 }
 
@@ -95,17 +122,17 @@ export function normalizeSiteContent(raw: unknown): SiteContent {
       : fallback.home.featureCards.map((item, idx) => ({ ...item, id: `feature-${idx + 1}` }));
 
   const homeNormalized: HomeContent = {
-    heroTitle: asString(home.heroTitle, fallback.home.heroTitle).trim(),
-    heroSubtitle: asString(home.heroSubtitle, fallback.home.heroSubtitle).trim(),
-    primaryCtaLabel: asString(home.primaryCtaLabel, fallback.home.primaryCtaLabel).trim(),
-    primaryCtaHref: asString(home.primaryCtaHref, fallback.home.primaryCtaHref).trim() || "/weekly",
-    secondaryCtaLabel: asString(home.secondaryCtaLabel, fallback.home.secondaryCtaLabel).trim(),
-    secondaryCtaHref: asString(home.secondaryCtaHref, fallback.home.secondaryCtaHref).trim() || "/contracts",
+    heroTitle: cleanText(home.heroTitle, fallback.home.heroTitle).trim(),
+    heroSubtitle: cleanText(home.heroSubtitle, fallback.home.heroSubtitle).trim(),
+    primaryCtaLabel: cleanText(home.primaryCtaLabel, fallback.home.primaryCtaLabel).trim(),
+    primaryCtaHref: cleanText(home.primaryCtaHref, fallback.home.primaryCtaHref).trim() || "/weekly",
+    secondaryCtaLabel: cleanText(home.secondaryCtaLabel, fallback.home.secondaryCtaLabel).trim(),
+    secondaryCtaHref: cleanText(home.secondaryCtaHref, fallback.home.secondaryCtaHref).trim() || "/contracts",
     featureCards: fallbackFeatures,
   };
 
-  const updatedAt = asString(rec.updatedAt, "").trim();
-  const updatedBy = asString(rec.updatedBy, "").trim();
+  const updatedAt = cleanText(rec.updatedAt, "").trim();
+  const updatedBy = cleanText(rec.updatedBy, "").trim();
 
   return {
     home: homeNormalized,
@@ -150,6 +177,7 @@ export async function saveSiteContent(content: SiteContent, updatedBy?: string):
     access: "public",
     token,
     contentType: "application/json",
+    allowOverwrite: true,
   });
 
   return toStore;
