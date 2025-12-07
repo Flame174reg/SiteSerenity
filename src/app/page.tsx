@@ -16,12 +16,12 @@ export default async function Home() {
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-full bg-white/10 border border-white/15 grid place-items-center overflow-hidden">
                 <Image
-                  src="/logo.png"
+                  src="/logo.svg"
                   alt="Site logo"
                   width={48}
                   height={48}
                   className="h-12 w-12 object-contain"
-                  unoptimized
+                  priority
                 />
               </div>
               <span className="pill w-fit">Serenity Seattle · community</span>

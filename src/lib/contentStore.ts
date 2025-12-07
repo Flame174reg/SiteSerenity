@@ -75,7 +75,9 @@ function cleanHtml(html: unknown, fallback = ""): string {
     },
     parser: { lowerCaseTags: true },
   }).trim();
-  return sanitized || fallback;
+
+  // even если очистка всё убрала, вернём пустую строку, а не дефолтный текст, чтобы правки не откатывались
+  return sanitized || "";
 }
 
 function fallbackContent(): SiteContent {
