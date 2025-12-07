@@ -11,7 +11,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "react-jsx",
+    "jsx": "preserve",
   "typeRoots": ["./src/types", "./node_modules/@types"],
     "incremental": true,
     "plugins": [
