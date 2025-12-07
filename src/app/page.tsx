@@ -7,29 +7,34 @@ export default async function Home() {
   const { home } = await getSiteContent();
 
   return (
-    <main className="min-h-[calc(100vh-56px)] grid place-items-center px-6">
-      <section className="w-full max-w-4xl text-center space-y-6">
-        <div className="card-soft p-10">
-          <h1 className="text-4xl md:text-5xl font-extrabold leading-tight">
-            {home.heroTitle}
-          </h1>
-          <p className="mt-3 text-lg muted">{home.heroSubtitle}</p>
+    <main className="min-h-[calc(100vh-56px)] px-6 py-10">
+      <section className="mx-auto max-w-5xl space-y-10">
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-8 md:p-12 shadow-2xl">
+          <div className="absolute inset-0 bg-gradient-to-br from-[rgba(124,58,237,0.18)] via-transparent to-[rgba(37,99,235,0.14)]" />
+          <div className="relative flex flex-col gap-4 text-left">
+            <span className="pill w-fit">Serenity Seattle · community</span>
+            <h1 className="text-4xl md:text-5xl font-extrabold leading-tight drop-shadow">
+              {home.heroTitle}
+            </h1>
+            <p className="text-lg text-white/80 max-w-3xl">{home.heroSubtitle}</p>
 
-          <div className="mt-6 flex justify-center gap-3 flex-wrap">
-            <Link href={home.primaryCtaHref || "/weekly"} className="btn">
-              {home.primaryCtaLabel}
-            </Link>
-            <Link href={home.secondaryCtaHref || "/contracts"} className="btn-ghost">
-              {home.secondaryCtaLabel}
-            </Link>
+            <div className="flex flex-wrap gap-3 pt-2">
+              <Link href={home.primaryCtaHref || "/weekly"} className="btn">
+                {home.primaryCtaLabel || "К галерее"}
+              </Link>
+              <Link href={home.secondaryCtaHref || "/rules"} className="btn-ghost">
+                {home.secondaryCtaLabel || "Правила семьи"}
+              </Link>
+            </div>
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {home.featureCards.slice(0, 6).map((card) => (
-            <div key={card.id} className="card text-left">
-              <div className="text-sm muted">{card.title}</div>
-              <div className="mt-2 font-semibold">{card.description}</div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {home.featureCards.slice(0, 6).map((card, idx) => (
+            <div key={card.id || idx} className="card text-left p-5 backdrop-blur-sm">
+              <div className="text-xs uppercase tracking-[0.12em] text-white/60">0{idx + 1}</div>
+              <div className="mt-2 text-lg font-semibold text-white">{card.title}</div>
+              <div className="mt-1 text-sm text-white/70 leading-relaxed">{card.description}</div>
             </div>
           ))}
         </div>
