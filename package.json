@@ -11,6 +11,7 @@
   "dependencies": {
     "@vercel/blob": "^1.1.1",
     "@vercel/postgres": "^0.10.0",
+    "sanitize-html": "^2.13.0",
     "next": "^15.5.7",
     "next-auth": "beta",
     "react": "19.1.0",

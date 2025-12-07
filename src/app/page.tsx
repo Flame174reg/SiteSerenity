@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { getSiteContent } from "@/lib/contentStore";
 
 export const revalidate = 0;
@@ -12,15 +13,34 @@ export default async function Home() {
         <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-8 md:p-12 shadow-2xl">
           <div className="absolute inset-0 bg-gradient-to-br from-[rgba(124,58,237,0.18)] via-transparent to-[rgba(37,99,235,0.14)]" />
           <div className="relative flex flex-col gap-4 text-left">
-            <span className="pill w-fit">Serenity Seattle · community</span>
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-full bg-white/10 border border-white/15 grid place-items-center overflow-hidden">
+                <Image
+                  src="/logo.png"
+                  alt="Site logo"
+                  width={48}
+                  height={48}
+                  className="h-12 w-12 object-contain"
+                  unoptimized
+                />
+              </div>
+              <span className="pill w-fit">Serenity Seattle · community</span>
+            </div>
             <h1 className="text-4xl md:text-5xl font-extrabold leading-tight drop-shadow">
               {home.heroTitle}
             </h1>
-            <p className="text-lg text-white/80 max-w-3xl">{home.heroSubtitle}</p>
+            {home.heroSubtitleHtml ? (
+              <div
+                className="text-lg text-white/80 max-w-3xl space-y-2"
+                dangerouslySetInnerHTML={{ __html: home.heroSubtitleHtml }}
+              />
+            ) : (
+              <p className="text-lg text-white/80 max-w-3xl">{home.heroSubtitle}</p>
+            )}
 
             <div className="flex flex-wrap gap-3 pt-2">
               <Link href={home.primaryCtaHref || "/weekly"} className="btn">
-                {home.primaryCtaLabel || "К галерее"}
+                {home.primaryCtaLabel || "Недельный актив"}
               </Link>
               <Link href={home.secondaryCtaHref || "/rules"} className="btn-ghost">
                 {home.secondaryCtaLabel || "Правила семьи"}

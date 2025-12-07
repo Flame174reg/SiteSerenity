@@ -1,4 +1,5 @@
 import { list, put } from "@vercel/blob";
+import sanitizeHtml from "sanitize-html";
 
 export type FeatureCard = {
   id: string;
@@ -9,6 +10,7 @@ export type FeatureCard = {
 export type HomeContent = {
   heroTitle: string;
   heroSubtitle: string;
+  heroSubtitleHtml?: string;
   primaryCtaLabel: string;
   primaryCtaHref: string;
   secondaryCtaLabel: string;
@@ -40,21 +42,17 @@ function cleanText(v: unknown, fallback = ""): string {
   const trimmed = base.trim();
   if (!trimmed) return fallback;
 
-  // Strip control characters
   const withoutCtrl = trimmed.replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
 
-  // If the string is mostly replacement characters, fallback
   const badChars = (withoutCtrl.match(/\uFFFD/g) || []).length;
   const ratioBad = withoutCtrl.length > 0 ? badChars / withoutCtrl.length : 0;
   if (ratioBad > 0.1) return fallback;
 
-  // Detect typical UTF-8/CP1251 mojibake (Ã,Ð,Ñ,â,...)
   const mojibakeMatches =
     withoutCtrl.match(/[ÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]/g) || [];
   const ratioMojibake = withoutCtrl.length > 0 ? mojibakeMatches.length / withoutCtrl.length : 0;
   if (ratioMojibake > 0.2) return fallback;
 
-  // Require at least some readable symbols (letters/digits/punctuation/spaces)
   const allowed = withoutCtrl.match(/[A-Za-zА-Яа-я0-9.,;:!?"'()\-–—\s]/g) || [];
   const ratioAllowed = withoutCtrl.length > 0 ? allowed.length / withoutCtrl.length : 0;
   if (ratioAllowed < 0.4) return fallback;
@@ -62,16 +60,36 @@ function cleanText(v: unknown, fallback = ""): string {
   return withoutCtrl.slice(0, 4000);
 }
 
+function cleanHtml(html: unknown, fallback = ""): string {
+  if (typeof html !== "string") return fallback;
+  const sanitized = sanitizeHtml(html, {
+    allowedTags: ["p", "br", "strong", "b", "em", "i", "u", "a", "div", "span", "img"],
+    allowedAttributes: {
+      a: ["href", "title", "target", "rel"],
+      img: ["src", "alt"],
+      "*": ["style"],
+    },
+    allowedSchemes: ["http", "https", "mailto"],
+    transformTags: {
+      a: sanitizeHtml.simpleTransform("a", { target: "_blank", rel: "noopener noreferrer" }),
+    },
+    parser: { lowerCaseTags: true },
+  }).trim();
+  return sanitized || fallback;
+}
+
 function fallbackContent(): SiteContent {
+  const subtitle =
+    "Командная витрина: загружайте контент, ведите правила и управляйте доступами в одном месте.";
   return {
     home: {
-      heroTitle: "Site Serenity",
-      heroSubtitle:
-        "Командная витрина: загружайте контент, ведите правила и управляйте доступами в одном месте.",
-      primaryCtaLabel: "К галерее",
+      heroTitle: "Serenity Seattle",
+      heroSubtitle: subtitle,
+      heroSubtitleHtml: `<p>${subtitle}</p>`,
+      primaryCtaLabel: "Недельный актив",
       primaryCtaHref: "/weekly",
-      secondaryCtaLabel: "Контракты",
-      secondaryCtaHref: "/contracts",
+      secondaryCtaLabel: "Правила семьи",
+      secondaryCtaHref: "/rules",
       featureCards: [
         {
           id: "feature-1",
@@ -124,10 +142,14 @@ export function normalizeSiteContent(raw: unknown): SiteContent {
   const homeNormalized: HomeContent = {
     heroTitle: cleanText(home.heroTitle, fallback.home.heroTitle).trim(),
     heroSubtitle: cleanText(home.heroSubtitle, fallback.home.heroSubtitle).trim(),
+    heroSubtitleHtml: cleanHtml(
+      home.heroSubtitleHtml,
+      fallback.home.heroSubtitleHtml || fallback.home.heroSubtitle
+    ),
     primaryCtaLabel: cleanText(home.primaryCtaLabel, fallback.home.primaryCtaLabel).trim(),
     primaryCtaHref: cleanText(home.primaryCtaHref, fallback.home.primaryCtaHref).trim() || "/weekly",
     secondaryCtaLabel: cleanText(home.secondaryCtaLabel, fallback.home.secondaryCtaLabel).trim(),
-    secondaryCtaHref: cleanText(home.secondaryCtaHref, fallback.home.secondaryCtaHref).trim() || "/contracts",
+    secondaryCtaHref: cleanText(home.secondaryCtaHref, fallback.home.secondaryCtaHref).trim() || "/rules",
     featureCards: fallbackFeatures,
   };
 

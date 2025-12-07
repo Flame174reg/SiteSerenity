@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCard, SiteContent } from "@/lib/contentStore";
 
 type ContentResp =
@@ -15,6 +15,12 @@ function emptyFeatureCard(): FeatureCard {
   };
 }
 
+function htmlToText(html: string): string {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return (div.textContent || div.innerText || "").trim();
+}
+
 export default function SiteContentEditor() {
   const [content, setContent] = useState<SiteContent | null>(null);
   const [baseline, setBaseline] = useState<SiteContent | null>(null);
@@ -22,6 +28,10 @@ export default function SiteContentEditor() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [subtitleHtml, setSubtitleHtml] = useState<string>("");
+
+  const subtitleRef = useRef<HTMLDivElement | null>(null);
+
   const inputClass = "w-full rounded-md bg-white/10 border border-white/20 px-3 py-2 outline-none";
   const textareaClass = `${inputClass} min-h-[90px]`;
   const canAddFeature = (content?.home.featureCards.length ?? 0) < 8;
@@ -35,11 +45,12 @@ export default function SiteContentEditor() {
         const j = (await r.json().catch(() => null)) as ContentResp | null;
         if (!r.ok || !j || !("ok" in j) || !j.ok) {
           const msg = j && "error" in j ? j.error : r.statusText;
-          throw new Error(msg || "Не удалось загрузить контент");
+          throw new Error(msg || "Не удалось загрузить данные");
         }
         if (!cancelled) {
           setContent(j.content);
           setBaseline(j.content);
+          setSubtitleHtml(j.content.home.heroSubtitleHtml || j.content.home.heroSubtitle || "");
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -66,6 +77,13 @@ export default function SiteContentEditor() {
         [key]: value,
       },
     });
+  }
+
+  function updateSubtitle(html: string) {
+    if (!content) return;
+    setSubtitleHtml(html);
+    updateHome("heroSubtitleHtml", html);
+    updateHome("heroSubtitle", htmlToText(html));
   }
 
   function updateFeature(id: string, patch: Partial<FeatureCard>) {
@@ -103,6 +121,25 @@ export default function SiteContentEditor() {
     });
   }
 
+  function exec(cmd: string, value?: string) {
+    if (!subtitleRef.current) return;
+    subtitleRef.current.focus();
+    document.execCommand(cmd, false, value);
+    updateSubtitle(subtitleRef.current.innerHTML);
+  }
+
+  function insertLink() {
+    const url = prompt("Вставьте ссылку (https://...)");
+    if (!url) return;
+    exec("createLink", url);
+  }
+
+  function insertImage() {
+    const url = prompt("Вставьте URL изображения");
+    if (!url) return;
+    exec("insertImage", url);
+  }
+
   async function save() {
     if (!content) return;
     setSaving(true);
@@ -121,6 +158,7 @@ export default function SiteContentEditor() {
       }
       setContent(j.content);
       setBaseline(j.content);
+      setSubtitleHtml(j.content.home.heroSubtitleHtml || "");
       setInfo("Сохранено");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -135,8 +173,7 @@ export default function SiteContentEditor() {
         <div>
           <h2 className="text-xl font-semibold">Редактор контента</h2>
           <p className="text-sm opacity-70">
-            Тексты главной страницы можно менять прямо здесь. Изменения применяются сразу после
-            сохранения.
+            Тексты главной страницы можно менять прямо здесь. Изменения применяются сразу после сохранения.
           </p>
           {content?.updatedAt && (
             <p className="text-xs opacity-60 mt-1">
@@ -145,11 +182,7 @@ export default function SiteContentEditor() {
             </p>
           )}
         </div>
-        <button
-          className="btn"
-          onClick={save}
-          disabled={!content || saving || !hasChanges}
-        >
+        <button className="btn" onClick={save} disabled={!content || saving || !hasChanges}>
           {saving ? "Сохранение..." : "Сохранить"}
         </button>
       </div>
@@ -170,14 +203,44 @@ export default function SiteContentEditor() {
                 onChange={(e) => updateHome("heroTitle", e.target.value)}
               />
             </label>
-            <label className="grid gap-1 text-sm">
-              <span className="opacity-80">Подзаголовок</span>
-              <textarea
-                className={`${textareaClass} min-h-[120px]`}
-                value={content.home.heroSubtitle}
-                onChange={(e) => updateHome("heroSubtitle", e.target.value)}
+
+            <div className="grid gap-2 text-sm">
+              <span className="opacity-80">Подзаголовок (rich text)</span>
+              <div className="flex flex-wrap gap-1">
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("bold")}>
+                  B
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("italic")}>
+                  I
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("underline")}>
+                  U
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("justifyLeft")}>
+                  ⬅
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("justifyCenter")}>
+                  ⬌
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={() => exec("justifyRight")}>
+                  ➡
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={insertLink}>
+                  Ссылка
+                </button>
+                <button className="btn-ghost text-xs" type="button" onClick={insertImage}>
+                  Картинка
+                </button>
+              </div>
+              <div
+                ref={subtitleRef}
+                className="min-h-[140px] rounded-md border border-white/20 bg-white/5 p-3 text-sm focus:outline-none"
+                contentEditable
+                suppressContentEditableWarning
+                onInput={(e) => updateSubtitle((e.currentTarget as HTMLDivElement).innerHTML)}
+                dangerouslySetInnerHTML={{ __html: subtitleHtml }}
               />
-            </label>
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-1 text-sm">
@@ -221,11 +284,7 @@ export default function SiteContentEditor() {
                 <h3 className="text-lg font-semibold">Карточки преимуществ</h3>
                 <p className="text-sm opacity-70">Добавляйте или обновляйте текст карточек на главной.</p>
               </div>
-              <button
-                className="btn-ghost text-sm disabled:opacity-50"
-                onClick={addFeature}
-                disabled={!canAddFeature}
-              >
+              <button className="btn-ghost text-sm disabled:opacity-50" onClick={addFeature} disabled={!canAddFeature}>
                 + Добавить
               </button>
             </div>
@@ -251,10 +310,7 @@ export default function SiteContentEditor() {
                   </label>
                   {content.home.featureCards.length > 1 && (
                     <div className="flex justify-end">
-                      <button
-                        className="text-xs text-red-300 hover:text-red-200"
-                        onClick={() => removeFeature(card.id)}
-                      >
+                      <button className="text-xs text-red-300 hover:text-red-200" onClick={() => removeFeature(card.id)}>
                         Удалить
                       </button>
                     </div>
